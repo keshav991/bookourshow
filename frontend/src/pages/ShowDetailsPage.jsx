@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { ArrowLeft, Clock3, MapPin } from 'lucide-react';
 import { apiRequest } from '../lib/api';
@@ -6,6 +6,7 @@ import { useAuth } from '../context/AuthContext';
 
 const localTime = (value) => new Intl.DateTimeFormat('en-IN', { hour: 'numeric', minute: '2-digit', timeZone: 'Asia/Kolkata' }).format(new Date(value));
 const localDate = (value) => new Intl.DateTimeFormat('en-IN', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', timeZone: 'Asia/Kolkata' }).format(new Date(`${value}T00:00:00+05:30`));
+const MAX_SELECTED_SEATS = 10;
 
 export function ShowDetailsPage() {
   const { showId } = useParams();
@@ -23,6 +24,7 @@ export function ShowDetailsPage() {
   const [selectedSeats, setSelectedSeats] = useState([]);
   const [bookingBusy, setBookingBusy] = useState(false);
   const [bookingError, setBookingError] = useState('');
+  const bookingAttemptKey = useRef(null);
   useEffect(() => {
     let active = true;
     setLoading(true); setError('');
@@ -69,9 +71,19 @@ export function ShowDetailsPage() {
   </main>;
 
   function toggleSeat(seat) {
-    setSelectedSeats((selected) => selected.includes(seat.show_seat_id)
-      ? selected.filter((id) => id !== seat.show_seat_id)
-      : [...selected, seat.show_seat_id]);
+    if (selectedSeats.includes(seat.show_seat_id)) {
+      bookingAttemptKey.current = null;
+      setSelectedSeats(selectedSeats.filter((id) => id !== seat.show_seat_id));
+      setBookingError('');
+      return;
+    }
+    if (selectedSeats.length >= MAX_SELECTED_SEATS) {
+      setBookingError(`You can select up to ${MAX_SELECTED_SEATS} seats per booking.`);
+      return;
+    }
+    bookingAttemptKey.current = null;
+    setSelectedSeats([...selectedSeats, seat.show_seat_id]);
+    setBookingError('');
   }
 
   async function continueBooking() {
@@ -85,7 +97,7 @@ export function ShowDetailsPage() {
       });
       locked = true;
       const booking = await apiRequest(`/bookings/shows/${showId}`, session.access_token, {
-        method: 'POST', body: JSON.stringify({ show_seat_ids: selectedSeats, idempotency_key: crypto.randomUUID() }),
+        method: 'POST', body: JSON.stringify({ show_seat_ids: selectedSeats, idempotency_key: bookingAttemptKey.current ||= crypto.randomUUID() }),
       });
       navigate(`/booking/${booking.id}`, { state: { booking } });
     } catch (reason) {

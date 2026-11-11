@@ -43,7 +43,7 @@ The existing `backend/seed/development_seed.sql` and `development_schedules.sql`
 
 These migration and seed files are prepared only. They were not executed against the live Supabase database. The migration set assumes the audited application tables and the existing `public.handle_new_user` trigger are present; on a fresh Supabase project, provision the existing Auth profile trigger first, then apply migrations. No Auth-managed schema or Auth configuration is modified by these migrations.
 
-BookOurShow is a responsive movie discovery interface with Supabase authentication and profile management, built with React, Vite, JavaScript, React Router, Lucide icons, and custom CSS. The movie catalog remains centralized mock data; the FastAPI backend now includes booking and payment foundation APIs for later frontend integration.
+BookOurShow is a responsive movie discovery and ticket booking application built with React, Vite, JavaScript, React Router, Lucide icons, FastAPI, SQLAlchemy, Supabase Auth, and Supabase PostgreSQL. Movie, show, seat, booking, and payment data are served through FastAPI.
 
 ## Frontend structure
 
@@ -54,7 +54,7 @@ frontend/
     components/           Navigation, auth frame, protected route, search, filters, carousel, cards
     context/               Shared Supabase auth session
     lib/                   Supabase client and FastAPI request helper
-    data/movies.js        Single mock movie catalog and search/filter helpers
+    data/movieCatalog.js  API movie mapping and search/filter helpers
     pages/                Home, movie listing/details, sign-in, registration and profile
     styles/               Global, navigation, auth, homepage and movie styles
     App.jsx
@@ -80,7 +80,7 @@ npm run build
 
 ## Phase 2: authentication and profile
 
-The frontend now uses one Supabase Auth client for email/password, Google OAuth, email verification, password reset, and the local browser session. It sends the signed-in access token to the existing FastAPI profile routes (`GET/PUT /users/me`). The API remains the source of truth for the profile role. Booking and payment APIs are implemented in the backend, but the current frontend still does not submit bookings.
+The frontend uses one Supabase Auth client for email/password, Google OAuth, email verification, password reset, and the local browser session. It sends the signed-in access token to FastAPI profile and booking routes. The API remains the source of truth for the profile role. The seat-selection flow creates pending bookings, and Razorpay Standard Checkout runs in the browser while order creation, signature verification, and booking confirmation remain on the backend.
 
 Configure `frontend/.env` with the existing Supabase project URL and its publishable key:
 
@@ -100,7 +100,7 @@ Email signup may require inbox verification according to the Supabase Auth setti
 
 The backend exposes public read-only movie/show catalogue endpoints. Shows use `TIMESTAMPTZ`; dates and times are displayed in `Asia/Kolkata`. Because the `shows` table has no status column, the API derives `scheduled`/`completed` from `start_time`. Razorpay test credentials are required only for payment-order APIs.
 
-The original `backend/seed/development_seed.sql` and `development_schedules.sql` are retained as legacy examples only. Do not execute them with the rebuilt schema. Follow the manual setup and seed order in the **Database foundation** section above. The audit read the live database; this implementation did not execute SQL against it.
+The original `backend/seed/development_seed.sql` and `development_schedules.sql` are retained as legacy examples only. Do not execute them with the rebuilt schema. Follow the manual setup and seed order in the **Database foundation** section above. The live database could not be accessed from this environment; verify its deployed schema in Supabase SQL Editor before treating prepared migrations as applied.
 
 Endpoints:
 
@@ -115,7 +115,7 @@ Endpoints:
 - `POST /bookings/{booking_id}/cancel` cancels unpaid bookings and releases their seats.
 - `POST /bookings/{booking_id}/payments/order` creates an idempotent Razorpay order; `POST /bookings/{booking_id}/payments/verify` verifies its signature and provider payment before confirming seats.
 
-To manually verify movie/show discovery, follow the migration and seed order above, start FastAPI (`uvicorn app.main:app --reload` from `backend`) and Vite (`npm run dev` from `frontend`), then open a movie and select a showtime. The current React UI still presents the seat map as a preview; the new booking endpoints are not yet wired into the UI.
+To manually verify the movie/show/seat flow, follow the database readiness checks above, start FastAPI (`uvicorn app.main:app --reload` from `backend`) and Vite (`npm run dev` from `frontend`), then open a movie, select a showtime and reserve seats. For test checkout, configure `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`, and `RAZORPAY_WEBHOOK_SECRET` in `backend/.env`. Configure a Razorpay Test Mode webhook for `payment.authorized`, `payment.captured`, and `payment.failed` events at `https://<public-backend-host>/webhooks/razorpay`. Razorpay cannot deliver webhooks directly to localhost; use an HTTPS staging host or an allowed tunnel. Never configure live keys for local testing.
 
 ## Phase 1 functionality
 

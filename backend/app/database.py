@@ -4,16 +4,11 @@ from app.core.config import settings
 
 
 def get_db_url(url: str) -> str:
-    """
-    Normalize URLs for SQLAlchemy.
-    For SQLite, use the file path with proper quoting.
-    For PostgreSQL, use pg8000 driver.
-    """
-    if "sqlite://" in url:
-        # Remove protocol prefix for SQLite
-        return url.replace("sqlite:///", "./", 1)
-    elif url.startswith("postgres://") or url.startswith("postgresql://"):
-        return get_db_url(url)
+    """Normalize legacy Postgres URL schemes while preserving SQLAlchemy URLs."""
+    if url.startswith("postgres://"):
+        return "postgresql+pg8000://" + url[len("postgres://"):]
+    if url.startswith("postgresql://"):
+        return "postgresql+pg8000://" + url[len("postgresql://"):]
     return url
 
 

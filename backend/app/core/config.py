@@ -11,8 +11,9 @@ class Settings(BaseSettings):
     RAZORPAY_KEY_ID: str | None = None
     RAZORPAY_KEY_SECRET: str | None = None
     RAZORPAY_API_URL: str = "https://api.razorpay.com/v1"
-    BOOKING_HOLD_SECONDS: int = Field(default=600, ge=30, le=900)
+    BOOKING_HOLD_SECONDS: int = Field(default=300, ge=30, le=900)
     PAYMENT_HOLD_SECONDS: int = Field(default=900, ge=300, le=1800)
+    RAZORPAY_WEBHOOK_SECRET: str | None = None
 
     @property
     def cors_origins_list(self) -> List[str]:

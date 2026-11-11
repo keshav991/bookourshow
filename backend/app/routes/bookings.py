@@ -1,9 +1,10 @@
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
+import json
 import secrets
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, Path, status
+from fastapi import APIRouter, Depends, HTTPException, Path, Request
 from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
@@ -21,10 +22,11 @@ from app.schemas.booking import (
 )
 from app.schemas.user import AuthenticatedUser
 from app.services.booking_service import SeatsUnavailableError, acquire_seat_locks
-from app.services.payment_service import razorpay_signature_matches
+from app.services.payment_service import razorpay_signature_matches, razorpay_webhook_signature_matches
 
 router = APIRouter(prefix="/bookings", tags=["Bookings"])
 seat_lock_router = APIRouter(prefix="/shows", tags=["Seat reservations"])
+webhook_router = APIRouter(prefix="/webhooks", tags=["Payment webhooks"])
 
 
 def _database_utc_now(db: Session) -> datetime:
@@ -91,12 +93,19 @@ def lock_seats(
     now = _database_utc_now(db)
     try:
         # Expiring the parent booking first releases all seats held by that booking.
-        db.execute(update(Booking).where(
+        expired_booking_ids = select(Booking.id).where(
             Booking.show_id == show_id,
             Booking.status == "PENDING",
             Booking.expires_at.is_not(None),
             Booking.expires_at <= func.now(),
+        )
+        db.execute(update(Booking).where(
+            Booking.id.in_(expired_booking_ids),
         ).values(status="EXPIRED"))
+        db.execute(update(Payment).where(
+            Payment.booking_id.in_(expired_booking_ids),
+            Payment.status.in_(["CREATED", "AUTHORIZED"]),
+        ).values(status="FAILED"))
         rows = acquire_seat_locks(
             db, show_id=show_id, show_seat_ids=payload.show_seat_ids,
             user_id=current_user.id, ttl_seconds=settings.BOOKING_HOLD_SECONDS, now=now,
@@ -246,13 +255,21 @@ def cancel_booking(
         raise HTTPException(status_code=409, detail="A captured payment must be refunded by Razorpay before cancellation")
     if booking.status not in {"PENDING", "CONFIRMED"}:
         raise HTTPException(status_code=409, detail="Booking cannot be cancelled in its current state")
+    if booking.status == "PENDING" and db.scalar(select(Payment.id).where(
+        Payment.booking_id == booking.id, Payment.status.in_(["CREATED", "AUTHORIZED"])
+    ).limit(1)):
+        raise HTTPException(status_code=409, detail="A payment attempt is active; wait for its result before cancelling")
     if booking.status == "PENDING":
+        # Run the booking transition first. PostgreSQL's after-trigger releases its
+        # seats only once the booking is terminal; SQLite fixtures need this fallback.
+        booking.status = "CANCELLED"
+        db.flush()
         db.execute(update(ShowSeat).where(
             ShowSeat.booking_id == booking.id,
             ShowSeat.status == "LOCKED",
         ).values(status="AVAILABLE", locked_by=None, locked_until=None, booking_id=None))
-    booking.status = "CANCELLED"
-    db.execute(update(Payment).where(Payment.booking_id == booking.id, Payment.status == "CREATED").values(status="FAILED"))
+    else:
+        booking.status = "CANCELLED"
     _commit(db)
     db.refresh(booking)
     return _booking_response(db, booking)
@@ -359,6 +376,8 @@ def verify_payment(
     ).with_for_update())
     if payment is None:
         raise HTTPException(status_code=404, detail="Payment order not found")
+    if payment.provider_payment_id and payment.provider_payment_id != payload.provider_payment_id:
+        raise HTTPException(status_code=409, detail="Payment ID does not match this payment attempt")
     if not razorpay_signature_matches(
         payload.provider_order_id, payload.provider_payment_id, payload.signature, secret
     ):
@@ -372,6 +391,23 @@ def verify_payment(
     booking = db.scalar(select(Booking).where(Booking.id == booking_id).with_for_update())
     if booking is None or booking.status != "PENDING" or booking.expires_at is None or _as_utc(booking.expires_at) <= _database_utc_now(db):
         raise HTTPException(status_code=409, detail="Booking has expired or is no longer pending")
+    seats = db.scalars(select(ShowSeat).where(
+        ShowSeat.booking_id == booking.id
+    ).order_by(ShowSeat.id).with_for_update()).all()
+    now = _database_utc_now(db)
+    if not seats or any(
+        seat.status != "LOCKED" or seat.locked_by != current_user.id or
+        seat.locked_until is None or _as_utc(seat.locked_until) <= now
+        for seat in seats
+    ):
+        raise HTTPException(status_code=409, detail="Seat hold expired before payment verification")
+    # Keep the booking and its seat rows locked while checking/capturing with Razorpay.
+    # A valid payment response then has time to commit before the lease can expire.
+    hold_until = now + timedelta(seconds=settings.PAYMENT_HOLD_SECONDS)
+    booking.expires_at = hold_until
+    for seat in seats:
+        seat.locked_until = hold_until
+    db.flush()
     try:
         base = settings.RAZORPAY_API_URL.rstrip("/")
         provider_response = httpx.get(
@@ -397,25 +433,94 @@ def verify_payment(
     except httpx.HTTPError as exc:
         raise HTTPException(status_code=502, detail="Could not verify payment with Razorpay") from exc
 
+    _finalize_captured_payment(db, payment, booking, payload.provider_payment_id)
+    db.refresh(payment)
+    return payment
+
+
+def _finalize_captured_payment(db: Session, payment: Payment, booking: Booking, payment_id: str) -> None:
+    if payment.status == "CAPTURED" and payment.provider_payment_id == payment_id:
+        return
+    if payment.status not in {"CREATED", "AUTHORIZED"}:
+        raise HTTPException(status_code=409, detail="Payment attempt is no longer active")
+    if payment.provider_payment_id and payment.provider_payment_id != payment_id:
+        raise HTTPException(status_code=409, detail="Payment ID does not match this payment attempt")
+    if booking.status != "PENDING" or booking.expires_at is None or _as_utc(booking.expires_at) <= _database_utc_now(db):
+        raise HTTPException(status_code=409, detail="Booking expired before payment was confirmed")
     seats = db.scalars(select(ShowSeat).where(
         ShowSeat.booking_id == booking.id
     ).order_by(ShowSeat.id).with_for_update()).all()
     now = _database_utc_now(db)
     if not seats or any(
-        seat.status != "LOCKED" or seat.locked_by != current_user.id or
+        seat.status != "LOCKED" or seat.locked_by != booking.user_id or
         seat.locked_until is None or _as_utc(seat.locked_until) <= now
         for seat in seats
     ):
-        db.rollback()
         raise HTTPException(status_code=409, detail="Seat locks expired before payment completed")
     for seat in seats:
         seat.status = "BOOKED"
         seat.locked_by = None
         seat.locked_until = None
-    payment.provider_payment_id = payload.provider_payment_id
+    payment.provider_payment_id = payment_id
     payment.status = "CAPTURED"
     booking.status = "CONFIRMED"
     booking.expires_at = None
     _commit(db, "Payment could not be finalized; retry verification with the same provider IDs")
-    db.refresh(payment)
-    return payment
+
+
+@webhook_router.post("/razorpay")
+async def receive_razorpay_webhook(request: Request, db: Session = Depends(get_db)):
+    secret = settings.RAZORPAY_WEBHOOK_SECRET
+    if not secret:
+        raise HTTPException(status_code=503, detail="Razorpay webhook secret is not configured")
+    raw_body = await request.body()
+    signature = request.headers.get("x-razorpay-signature", "")
+    if not razorpay_webhook_signature_matches(raw_body, signature, secret):
+        raise HTTPException(status_code=400, detail="Invalid webhook signature")
+    try:
+        event = json.loads(raw_body)
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+        raise HTTPException(status_code=400, detail="Invalid webhook JSON") from exc
+    if not isinstance(event, dict):
+        raise HTTPException(status_code=400, detail="Invalid webhook payload")
+    event_name = event.get("event")
+    data = event.get("payload")
+    payment_data = data.get("payment") if isinstance(data, dict) else None
+    entity = payment_data.get("entity") if isinstance(payment_data, dict) else None
+    if event_name not in {"payment.authorized", "payment.captured", "payment.failed"}:
+        return {"received": True, "ignored": True}
+    if not isinstance(entity, dict):
+        raise HTTPException(status_code=400, detail="Webhook payment entity is invalid")
+    order_id = entity.get("order_id")
+    payment_id = entity.get("id")
+    if not order_id or not payment_id:
+        raise HTTPException(status_code=400, detail="Webhook payment is missing its order or payment ID")
+
+    payment = db.scalar(select(Payment).where(
+        Payment.provider == "RAZORPAY", Payment.provider_order_id == order_id
+    ).with_for_update())
+    if payment is None:
+        return {"received": True, "ignored": True}
+    booking = db.scalar(select(Booking).where(Booking.id == payment.booking_id).with_for_update())
+    if booking is None:
+        return {"received": True, "ignored": True}
+    amount_minor = int((payment.amount * 100).quantize(Decimal("1")))
+    if entity.get("amount") != amount_minor or entity.get("currency") != "INR":
+        raise HTTPException(status_code=400, detail="Webhook payment amount or currency does not match")
+
+    provider_status = entity.get("status")
+    if event_name == "payment.failed" or provider_status == "failed":
+        if payment.status in {"CREATED", "AUTHORIZED"}:
+            payment.provider_payment_id = payment_id
+            payment.status = "FAILED"
+            _commit(db, "Payment failure could not be recorded")
+        return {"received": True, "duplicate": payment.status == "FAILED"}
+    if provider_status == "authorized" and payment.status == "CREATED":
+        payment.provider_payment_id = payment_id
+        payment.status = "AUTHORIZED"
+        _commit(db, "Payment authorization could not be recorded")
+        return {"received": True}
+    if event_name == "payment.captured" or provider_status == "captured":
+        _finalize_captured_payment(db, payment, booking, payment_id)
+        return {"received": True, "confirmed": True}
+    return {"received": True, "ignored": True}

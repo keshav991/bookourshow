@@ -78,7 +78,7 @@ class Payment(Base):
         Index("ix_payments_booking_created", "booking_id", "created_at"),
     )
 
-    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    id: Mapped[int] = mapped_column(BigInteger().with_variant(Integer, "sqlite"), Identity(), primary_key=True)
     booking_id: Mapped[int] = mapped_column(ForeignKey("bookings.id", name="fk_payments_booking", ondelete="RESTRICT"), nullable=False)
     provider: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'RAZORPAY'"))
     provider_order_id: Mapped[str | None] = mapped_column(Text, nullable=True)

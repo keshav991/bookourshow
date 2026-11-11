@@ -1,21 +1,24 @@
 import hashlib
 import hmac
+import json
 import tempfile
 import threading
 import time
 import unittest
+from unittest.mock import Mock, patch
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
 from uuid import uuid4
 
-from sqlalchemy import create_engine, event, insert, select
+from sqlalchemy import create_engine, event, insert, select, update
 from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 from fastapi.testclient import TestClient
 
 from app.database import Base
+from app.core.config import settings
 from app.models.booking import Booking, BookingSeat, Payment
 from app.models.show import MovieShow, ShowSeat
 from app.models.theatre import Seat
@@ -26,6 +29,7 @@ from app.database import get_db
 from app.main import app
 from app.services.booking_service import SeatsUnavailableError, acquire_seat_locks
 from app.services.payment_service import razorpay_signature_matches
+from app.services.payment_service import razorpay_webhook_signature_matches
 
 
 class TestBookingDatabaseFoundation(unittest.TestCase):
@@ -159,6 +163,13 @@ class TestBookingDatabaseFoundation(unittest.TestCase):
         self.assertTrue(razorpay_signature_matches(order, payment, signature, secret))
         self.assertFalse(razorpay_signature_matches(order, payment, "0" * 64, secret))
 
+    def test_razorpay_webhook_signature_uses_raw_body(self):
+        raw_body = b'{"event":"payment.captured"}'
+        secret = "webhook-secret"
+        signature = hmac.new(secret.encode(), raw_body, hashlib.sha256).hexdigest()
+        self.assertTrue(razorpay_webhook_signature_matches(raw_body, signature, secret))
+        self.assertFalse(razorpay_webhook_signature_matches(raw_body + b" ", signature, secret))
+
 
 class TestSeatLockApi(unittest.TestCase):
     def setUp(self):
@@ -179,6 +190,12 @@ class TestSeatLockApi(unittest.TestCase):
             ))
             db.commit()
         self.active_user = [AuthenticatedUser(id=uuid4(), email="test@example.invalid")]
+        self.previous_webhook_secret = settings.RAZORPAY_WEBHOOK_SECRET
+        self.previous_razorpay_id = settings.RAZORPAY_KEY_ID
+        self.previous_razorpay_secret = settings.RAZORPAY_KEY_SECRET
+        settings.RAZORPAY_WEBHOOK_SECRET = "test-webhook-secret"
+        settings.RAZORPAY_KEY_ID = "rzp_test_bookourshow"
+        settings.RAZORPAY_KEY_SECRET = "test-key-secret"
 
         def override_db():
             with self.Session() as db:
@@ -194,6 +211,9 @@ class TestSeatLockApi(unittest.TestCase):
     def tearDown(self):
         app.dependency_overrides.pop(get_db, None)
         app.dependency_overrides.pop(get_current_user, None)
+        settings.RAZORPAY_WEBHOOK_SECRET = self.previous_webhook_secret
+        settings.RAZORPAY_KEY_ID = self.previous_razorpay_id
+        settings.RAZORPAY_KEY_SECRET = self.previous_razorpay_secret
         Base.metadata.drop_all(self.engine, tables=list(reversed(self.tables)))
         self.engine.dispose()
 
@@ -204,6 +224,8 @@ class TestSeatLockApi(unittest.TestCase):
         self.assertEqual(locked.json()[0]["status"], "LOCKED")
 
         self.active_user[0] = AuthenticatedUser(id=uuid4(), email="other@example.invalid")
+        denied_lock = self.client.post("/shows/1/seats/lock", json={"show_seat_ids": [30]})
+        self.assertEqual(denied_lock.status_code, 409)
         denied = self.client.post("/shows/1/seats/release", json={"show_seat_ids": [30]})
         self.assertEqual(denied.status_code, 409)
 
@@ -236,6 +258,115 @@ class TestSeatLockApi(unittest.TestCase):
             seat = db.get(ShowSeat, 30)
             self.assertEqual(seat.status, "AVAILABLE")
             self.assertIsNone(seat.booking_id)
+
+    def _create_pending_booking_with_payment(self):
+        self.client.post("/shows/1/seats/lock", json={"show_seat_ids": [30]})
+        booking_response = self.client.post("/bookings/shows/1", json={
+            "show_seat_ids": [30], "idempotency_key": "webhook-booking-0001",
+        })
+        self.assertEqual(booking_response.status_code, 201, booking_response.text)
+        booking = booking_response.json()
+        with self.Session() as db:
+            db.add(Payment(
+                booking_id=booking["id"], provider="RAZORPAY", provider_order_id="order_test_1",
+                amount=Decimal("180.00"), status="CREATED", idempotency_key="payment-test-0001",
+            ))
+            db.commit()
+        return booking
+
+    def _send_webhook(self, payload, secret="test-webhook-secret"):
+        raw = json.dumps(payload, separators=(",", ":")).encode()
+        signature = hmac.new(secret.encode(), raw, hashlib.sha256).hexdigest()
+        return self.client.post("/webhooks/razorpay", content=raw, headers={
+            "content-type": "application/json", "x-razorpay-signature": signature,
+            "x-razorpay-event-id": "evt_test_1",
+        })
+
+    def test_webhook_rejects_invalid_signature_and_confirms_captured_payment_idempotently(self):
+        booking = self._create_pending_booking_with_payment()
+        payload = {"event": "payment.captured", "payload": {"payment": {"entity": {
+            "id": "pay_test_1", "order_id": "order_test_1", "amount": 18000,
+            "currency": "INR", "status": "captured",
+        }}}}
+        invalid = self.client.post("/webhooks/razorpay", json=payload, headers={"x-razorpay-signature": "0" * 64})
+        self.assertEqual(invalid.status_code, 400)
+
+        captured = self._send_webhook(payload)
+        self.assertEqual(captured.status_code, 200, captured.text)
+        duplicate = self._send_webhook(payload)
+        self.assertEqual(duplicate.status_code, 200, duplicate.text)
+        details = self.client.get(f"/bookings/{booking['id']}")
+        self.assertEqual(details.status_code, 200, details.text)
+        self.assertEqual(details.json()["status"], "CONFIRMED")
+        with self.Session() as db:
+            seat = db.get(ShowSeat, 30)
+            payment = db.scalar(select(Payment).where(Payment.provider_order_id == "order_test_1"))
+            self.assertEqual(seat.status, "BOOKED")
+            self.assertEqual(payment.status, "CAPTURED")
+        self.assertEqual(self.client.post("/shows/1/seats/lock", json={"show_seat_ids": [30]}).status_code, 409)
+
+    def test_booking_rejects_an_expired_seat_lock(self):
+        owner = self.active_user[0].id
+        with self.Session() as db:
+            seat = db.get(ShowSeat, 30)
+            seat.status = "LOCKED"
+            seat.locked_by = owner
+            seat.locked_until = datetime.now(timezone.utc) - timedelta(seconds=1)
+            db.commit()
+        response = self.client.post("/bookings/shows/1", json={
+            "show_seat_ids": [30], "idempotency_key": "expired-lock-test-1",
+        })
+        self.assertEqual(response.status_code, 409, response.text)
+
+    def test_failed_payment_webhook_is_idempotent_and_does_not_confirm_booking(self):
+        booking = self._create_pending_booking_with_payment()
+        payload = {"event": "payment.failed", "payload": {"payment": {"entity": {
+            "id": "pay_test_failed", "order_id": "order_test_1", "amount": 18000,
+            "currency": "INR", "status": "failed",
+        }}}}
+        first = self._send_webhook(payload)
+        second = self._send_webhook(payload)
+        self.assertEqual(first.status_code, 200, first.text)
+        self.assertEqual(second.status_code, 200, second.text)
+        self.assertEqual(self.client.get(f"/bookings/{booking['id']}").json()["status"], "PENDING")
+        with self.Session() as db:
+            self.assertEqual(db.scalar(select(Payment).where(Payment.provider_order_id == "order_test_1")).status, "FAILED")
+
+    def test_order_creation_and_server_verification_confirm_booking(self):
+        booking = self._create_pending_booking_with_payment()
+        with self.Session() as db:
+            db.execute(update(Payment).where(Payment.provider_order_id == "order_test_1").values(
+                provider_order_id=None, status="FAILED", provider_payment_id=None,
+            ))
+            db.commit()
+        order_response = Mock()
+        order_response.json.return_value = {"id": "order_created_1", "amount": 18000, "currency": "INR"}
+        order_response.raise_for_status.return_value = None
+        with patch("app.routes.bookings.httpx.post", return_value=order_response):
+            created = self.client.post(f"/bookings/{booking['id']}/payments/order", json={
+                "idempotency_key": "checkout-order-0001",
+            })
+        self.assertEqual(created.status_code, 201, created.text)
+        self.assertEqual(created.json()["provider_order_id"], "order_created_1")
+
+        payment_id = "pay_created_1"
+        signature = hmac.new(
+            settings.RAZORPAY_KEY_SECRET.encode(), f"order_created_1|{payment_id}".encode(), hashlib.sha256,
+        ).hexdigest()
+        provider_response = Mock()
+        provider_response.json.return_value = {
+            "id": payment_id, "order_id": "order_created_1", "amount": 18000,
+            "currency": "INR", "status": "captured",
+        }
+        provider_response.raise_for_status.return_value = None
+        with patch("app.routes.bookings.httpx.get", return_value=provider_response):
+            verified = self.client.post(f"/bookings/{booking['id']}/payments/verify", json={
+                "provider_order_id": "order_created_1", "provider_payment_id": payment_id,
+                "signature": signature,
+            })
+        self.assertEqual(verified.status_code, 200, verified.text)
+        self.assertEqual(verified.json()["status"], "CAPTURED")
+        self.assertEqual(self.client.get(f"/bookings/{booking['id']}").json()["status"], "CONFIRMED")
 
 
 if __name__ == "__main__":
