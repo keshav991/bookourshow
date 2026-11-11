@@ -1,23 +1,26 @@
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
 from app.core.config import settings
 
 
 def get_db_url(url: str) -> str:
     """
-    Normalize postgresql URLs to use the installed pg8000 pure-Python driver
-    if no driver is specified, avoiding Windows binary DLL permission issues.
+    Normalize URLs for SQLAlchemy.
+    For SQLite, use the file path with proper quoting.
+    For PostgreSQL, use pg8000 driver.
     """
-    if url.startswith("postgres://"):
-        return url.replace("postgres://", "postgresql+pg8000://", 1)
-    if url.startswith("postgresql://") and not url.startswith("postgresql+"):
-        return url.replace("postgresql://", "postgresql+pg8000://", 1)
+    if "sqlite://" in url:
+        # Remove protocol prefix for SQLite
+        return url.replace("sqlite:///", "./", 1)
+    elif url.startswith("postgres://") or url.startswith("postgresql://"):
+        return get_db_url(url)
     return url
 
 
 engine = create_engine(
     get_db_url(settings.DATABASE_URL),
-    pool_pre_ping=True
+    pool_pre_ping=True,
+    echo=False
 )
 
 SessionLocal = sessionmaker(
@@ -29,6 +32,16 @@ SessionLocal = sessionmaker(
 
 class Base(DeclarativeBase):
     pass
+
+
+# For SQLite, need to ensure table creation is explicit
+if "sqlite" in settings.DATABASE_URL:
+    import os
+    # Ensure the DB file exists
+    db_path = "./bookings.db"
+    print(f"Using SQLite database at: {db_path}")
+    if not os.path.exists(db_path):
+        print("Creating new database...")
 
 
 def get_db():

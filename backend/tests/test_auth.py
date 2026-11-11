@@ -1,6 +1,6 @@
 import unittest
 import uuid
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 from fastapi import HTTPException
 from fastapi.security import HTTPAuthorizationCredentials
 
@@ -12,6 +12,7 @@ from app.routes.users import get_my_profile, update_my_profile, get_my_bookings_
 from app.schemas.auth import UserLoginRequest
 from app.schemas.user import AuthenticatedUser, UserProfileUpdate
 from app.services.auth_service import auth_service
+from supabase_auth.errors import AuthApiError
 
 
 class TestSupabaseAuthIntegration(unittest.TestCase):
@@ -44,8 +45,9 @@ class TestSupabaseAuthIntegration(unittest.TestCase):
 
     def test_05_invalid_jwt_rejected(self):
         """5. Malformed/invalid JWT is rejected with HTTP 401."""
-        with self.assertRaises(HTTPException) as ctx:
-            get_current_user(HTTPAuthorizationCredentials(scheme="Bearer", credentials="malformed.jwt.token"))
+        with patch("app.dependencies.auth.supabase_client.auth.get_user", side_effect=AuthApiError("Invalid JWT", 401, None)):
+            with self.assertRaises(HTTPException) as ctx:
+                get_current_user(HTTPAuthorizationCredentials(scheme="Bearer", credentials="malformed.jwt.token"))
         self.assertEqual(ctx.exception.status_code, 401)
         self.assertIn("Authentication failed", ctx.exception.detail)
 
@@ -136,14 +138,17 @@ class TestSupabaseAuthIntegration(unittest.TestCase):
 
     def test_12_auth_service_invalid_login(self):
         """12. Invalid credentials in login returns HTTP 401."""
-        with self.assertRaises(HTTPException) as ctx:
-            auth_service.login(UserLoginRequest(email="nonexistent@example.com", password="WrongPassword!"))
+        with patch("app.services.auth_service.supabase_client.auth.sign_in_with_password", side_effect=AuthApiError("Invalid login credentials", 401, None)):
+            with self.assertRaises(HTTPException) as ctx:
+                auth_service.login(UserLoginRequest(email="nonexistent@example.com", password="WrongPassword!"))
         self.assertEqual(ctx.exception.status_code, 401)
         self.assertIn("Invalid email or password", ctx.exception.detail)
 
     def test_13_auth_service_logout(self):
         """13. Logout revokes token session cleanly."""
-        res = auth_service.logout(token="mock_or_test_token")
+        with patch("app.services.auth_service.httpx.post") as post:
+            post.return_value.is_error = False
+            res = auth_service.logout(token="mock_or_test_token")
         self.assertIn("sign", res.message.lower())
 
 

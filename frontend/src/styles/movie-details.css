@@ -1,0 +1,48 @@
+.movie-details__hero { position: relative; overflow: hidden; min-height: 490px; isolation: isolate; color: #fff; background: #292a2d; }
+.movie-details__hero > img { position: absolute; z-index: -2; inset: 0; width: 100%; height: 100%; object-fit: cover; opacity: .42; }
+.movie-details__hero::before { position: absolute; z-index: -2; inset: 0; content: ""; background: radial-gradient(ellipse at 70% 40%, #5e4141, #292a2d 65%); }
+.movie-details__shade { position: absolute; z-index: -1; inset: 0; background: linear-gradient(90deg, rgb(15 16 20 / 91%), rgb(15 16 20 / 62%) 65%, rgb(15 16 20 / 38%)); }
+.movie-details__hero-content { padding-block: 25px 38px; }
+.back-link { display: inline-flex; align-items: center; gap: 7px; color: rgb(255 255 255 / 85%); font-size: 11px; font-weight: 600; }
+.back-link:hover { color: #fff; }
+.movie-details__main { display: grid; max-width: 920px; grid-template-columns: 220px 1fr; align-items: center; gap: 35px; padding-top: 28px; }
+.movie-details__poster { width: 220px; aspect-ratio: 2 / 3; border: 1px solid rgb(255 255 255 / 16%); border-radius: 7px; object-fit: cover; box-shadow: 0 14px 38px rgb(0 0 0 / 30%); }
+.movie-details__summary h1 { margin: 11px 0 8px; font-size: clamp(32px, 5vw, 52px); line-height: 1.08; letter-spacing: -.045em; }
+.movie-details__genres { margin: 0; color: rgb(255 255 255 / 78%); font-size: 13px; }
+.status-label { display: inline-flex; padding: 5px 8px; border-radius: 3px; color: #fff; background: #388e3c; font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; }
+.status-label--upcoming { background: var(--brand); }
+.movie-details__facts { display: flex; flex-wrap: wrap; gap: 17px; margin-top: 21px; color: #fff; font-size: 11px; }
+.movie-details__facts span { display: inline-flex; align-items: center; gap: 6px; }
+.movie-details__facts span:first-child svg { color: #ffd15c; }
+.movie-details__language { margin: 14px 0 0; color: rgb(255 255 255 / 76%); font-size: 11px; }
+.movie-details__actions { display: flex; flex-wrap: wrap; gap: 9px; margin-top: 23px; }
+.booking-notice { max-width: 390px; margin: 12px 0 0; color: #ffe2a7; font-size: 11px; }
+.movie-details__body { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(240px, 1fr); gap: 55px; padding-block: 34px 55px; }
+.movie-details__body h2 { margin: 0 0 12px; font-size: 18px; letter-spacing: -.02em; }
+.movie-details__about p { max-width: 660px; margin: 0; color: #626262; font-size: 13px; line-height: 1.8; }
+.movie-details__credits { display: grid; gap: 14px; }
+.movie-details__credits div { display: grid; gap: 5px; }
+.movie-details__credits span { color: #888; font-size: 10px; text-transform: uppercase; letter-spacing: .08em; }
+.movie-details__credits strong { color: #333; font-size: 11px; font-weight: 600; line-height: 1.6; }
+.movie-details__trailer { grid-column: 1 / -1; padding-top: 21px; border-top: 1px solid var(--border); }
+.movie-details__trailer p { margin: 0 0 14px; color: #666; font-size: 12px; }
+
+@media (max-width: 680px) {
+  .movie-details__hero { min-height: 0; }
+  .movie-details__hero-content { padding-block: 18px 28px; }
+  .movie-details__main { grid-template-columns: 116px 1fr; gap: 17px; padding-top: 23px; }
+  .movie-details__poster { width: 116px; }
+  .movie-details__summary h1 { margin-top: 8px; font-size: clamp(24px, 7vw, 33px); }
+  .movie-details__genres { font-size: 10px; line-height: 1.55; }
+  .movie-details__facts { gap: 8px 12px; margin-top: 12px; font-size: 9px; }
+  .movie-details__facts svg { width: 13px; height: 13px; }
+  .movie-details__language { margin-top: 8px; font-size: 9px; }
+  .movie-details__actions { gap: 7px; margin-top: 13px; }
+  .movie-details__actions .button { min-height: 37px; padding-inline: 10px; font-size: 10px; }
+  .movie-details__body { grid-template-columns: 1fr; gap: 25px; padding-block: 25px 35px; }
+}
+@media (max-width: 390px) {
+  .movie-details__main { grid-template-columns: 92px 1fr; gap: 12px; }
+  .movie-details__poster { width: 92px; }
+  .movie-details__facts { flex-direction: column; align-items: flex-start; }
+}

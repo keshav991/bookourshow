@@ -1,0 +1,53 @@
+.site-header { position: sticky; z-index: 20; top: 0; border-bottom: 1px solid var(--border); background: rgb(255 255 255 / 97%); box-shadow: 0 2px 10px rgb(0 0 0 / 3%); backdrop-filter: blur(12px); }
+.site-header__main { display: grid; min-height: 73px; grid-template-columns: 220px minmax(220px, 1fr) auto; align-items: center; gap: 24px; }
+.brand { display: inline-flex; width: fit-content; align-items: center; gap: 9px; color: #242424; font-size: 18px; font-weight: 800; letter-spacing: -.055em; white-space: nowrap; }
+.brand__mark { display: grid; width: 37px; height: 37px; flex: none; place-items: center; border-radius: 8px; color: #fff; background: var(--brand); }
+.brand__accent { color: var(--brand); }
+.site-header__search { min-width: 0; }
+.search-box { display: flex; height: 42px; align-items: center; gap: 10px; padding: 0 12px; border: 1px solid #e6e6e6; border-radius: 5px; color: #888; background: #fafafa; transition: border-color .18s ease, box-shadow .18s ease, background .18s ease; }
+.search-box:focus-within { border-color: #e8a4a2; background: #fff; box-shadow: 0 0 0 3px rgb(229 57 53 / 9%); }
+.search-box input { width: 100%; min-width: 0; padding: 0; border: 0; outline: 0; color: #333; background: transparent; font-size: 12px; }
+.search-box input::placeholder { color: #888; }
+.search-box input::-webkit-search-cancel-button { display: none; }
+.search-box button { display: grid; flex: none; width: 26px; height: 26px; place-items: center; padding: 0; border: 0; border-radius: 50%; color: #777; background: transparent; cursor: pointer; }
+.search-box button:hover { color: var(--brand); background: #f7eeee; }
+.site-header__actions { display: flex; align-items: center; gap: 17px; }
+.location-picker { display: inline-flex; min-width: 112px; align-items: center; gap: 5px; color: #555; }
+.location-picker svg { flex: none; color: var(--brand); }
+.location-picker select { width: 100%; max-width: 125px; padding: 7px 16px 7px 0; border: 0; outline: 0; color: #444; background: transparent; cursor: pointer; font-size: 11px; }
+.signin-link { color: #444; font-size: 12px; font-weight: 600; }
+.signin-link:hover { color: var(--brand); }
+.header-register { min-height: 37px; padding-inline: 15px; font-size: 11px; }
+.site-header__mobile-search, .mobile-menu-toggle, .mobile-menu { display: none; }
+.secondary-nav { border-bottom: 1px solid var(--border); background: #fff; }
+.secondary-nav__inner { display: flex; min-height: 40px; align-items: center; gap: 28px; overflow-x: auto; scrollbar-width: none; }
+.secondary-nav__inner::-webkit-scrollbar { display: none; }
+.secondary-nav a { display: inline-flex; flex: none; align-items: center; gap: 5px; color: #666; font-size: 11px; font-weight: 600; transition: color .16s ease; }
+.secondary-nav a:hover { color: var(--brand); }
+.secondary-nav__soon span { color: #aaa; font-size: 8px; font-weight: 500; }
+
+@media (max-width: 900px) {
+  .site-header__main { grid-template-columns: 190px minmax(150px, 1fr) auto; gap: 14px; }
+  .site-header__actions { gap: 11px; }
+  .location-picker { min-width: 95px; }
+  .site-header__actions .location-picker select { max-width: 100px; }
+  .brand { font-size: 17px; }
+}
+@media (max-width: 680px) {
+  .site-header__main { min-height: 62px; grid-template-columns: 1fr auto; gap: 10px; }
+  .site-header__search, .site-header__actions { display: none; }
+  .site-header__mobile-search { display: block; padding-bottom: 11px; }
+  .site-header__mobile-search .search-box { height: 38px; }
+  .mobile-menu-toggle { display: grid; width: 40px; height: 40px; place-items: center; padding: 0; border: 1px solid var(--border); border-radius: 6px; color: #333; background: #fff; cursor: pointer; }
+  .mobile-menu { display: flex; align-items: center; gap: 10px; padding: 11px 16px 14px; border-top: 1px solid #f0f0f0; background: #fff; }
+  .mobile-menu > a { display: inline-flex; min-height: 35px; align-items: center; padding: 0 12px; border: 1px solid var(--border); border-radius: 5px; color: #444; font-size: 11px; font-weight: 700; }
+  .mobile-menu > a:last-child { border-color: var(--brand); color: #fff; background: var(--brand); }
+  .mobile-menu .location-picker { margin-right: auto; }
+  .secondary-nav__inner { min-height: 37px; gap: 22px; }
+}
+@media (max-width: 420px) {
+  .mobile-menu { gap: 7px; }
+  .mobile-menu > a { padding-inline: 8px; font-size: 10px; }
+  .mobile-menu .location-picker { min-width: 95px; }
+  .mobile-menu .location-picker select { max-width: 103px; }
+}

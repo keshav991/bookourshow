@@ -1,7 +1,9 @@
 from uuid import UUID
 from fastapi import HTTPException, status
 from supabase_auth.errors import AuthApiError, AuthRetryableError
+import httpx
 
+from app.core.config import settings
 from app.core.supabase import supabase_client
 from app.schemas.auth import (
     AuthMessageResponse,
@@ -138,14 +140,29 @@ class AuthService:
             return AuthMessageResponse(message="No active session token provided")
 
         try:
-            # Revoke session in Supabase Auth for this specific JWT
-            supabase_client.auth.admin.sign_out(jwt=token, scope="global")
+            # Supabase's user logout endpoint revokes the presented user's session.
+            # Do not use the shared service client's admin sign_out(scope="global").
+            response = httpx.post(
+                f"{settings.SUPABASE_URL.rstrip('/')}/auth/v1/logout?scope=local",
+                headers={
+                    "apikey": settings.SUPABASE_PUBLISHABLE_KEY,
+                    "Authorization": f"Bearer {token}",
+                },
+                timeout=10.0,
+            )
+            if response.is_error:
+                raise HTTPException(
+                    status_code=status.HTTP_502_BAD_GATEWAY,
+                    detail="Supabase could not sign out this session.",
+                )
             return AuthMessageResponse(message="Successfully signed out")
-        except AuthApiError as exc:
-            msg = getattr(exc, "message", str(exc))
-            return AuthMessageResponse(message=f"Session revoked ({msg})")
-        except Exception:
-            return AuthMessageResponse(message="Successfully signed out")
+        except HTTPException:
+            raise
+        except httpx.HTTPError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail="Could not reach Supabase to sign out this session.",
+            ) from exc
 
 
 auth_service = AuthService()

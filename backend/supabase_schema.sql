@@ -1,64 +1,24 @@
--- ==============================================================================
--- BookOurShow: Supabase Profiles & Automated User Sync Schema
--- Execute this script in the Supabase Dashboard -> SQL Editor
--- ==============================================================================
+-- Legacy compatibility filename; intentionally read-only.
+-- The complete application schema is maintained in backend/database/migrations/.
+-- Supabase Auth owns auth.users and its configuration. This project already has
+-- public.handle_new_user attached to auth.users; do not drop/recreate that trigger.
+-- Migration 003_rls_policies.sql checks that the existing signup trigger is present.
 
--- 1. Create public.profiles table
-CREATE TABLE IF NOT EXISTS public.profiles (
-    id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
-    full_name TEXT,
-    role TEXT NOT NULL DEFAULT 'customer',
-    created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now()),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now())
-);
-
--- 2. Add an index for faster lookups
-CREATE INDEX IF NOT EXISTS idx_profiles_role ON public.profiles(role);
-
--- 3. Enable Row Level Security (RLS)
-ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
-
--- 4. RLS Policies
--- Allow authenticated users to view their own profile
-DROP POLICY IF EXISTS "Users can view own profile" ON public.profiles;
-CREATE POLICY "Users can view own profile" 
-ON public.profiles 
-FOR SELECT 
-USING (auth.uid() = id);
-
--- Allow authenticated users to update their own profile
-DROP POLICY IF EXISTS "Users can update own profile" ON public.profiles;
-CREATE POLICY "Users can update own profile" 
-ON public.profiles 
-FOR UPDATE 
-USING (auth.uid() = id);
-
--- 5. Trigger Function: automatically creates a customer profile upon Supabase signup
-CREATE OR REPLACE FUNCTION public.handle_new_user()
-RETURNS TRIGGER AS $$
+DO $$
 BEGIN
-    INSERT INTO public.profiles (id, full_name, role)
-    VALUES (
-        new.id,
-        COALESCE(new.raw_user_meta_data->>'full_name', ''),
-        'customer' -- Security: Enforce 'customer' default. Never trust client-supplied role metadata.
-    )
-    ON CONFLICT (id) DO NOTHING;
-    RETURN new;
-END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
+    IF to_regclass('public.profiles') IS NULL THEN
+        RAISE EXCEPTION 'public.profiles is not installed; follow backend/database/migrations/ first.';
+    END IF;
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_trigger t
+        JOIN pg_class c ON c.oid=t.tgrelid
+        JOIN pg_namespace n ON n.oid=c.relnamespace
+        JOIN pg_proc p ON p.oid=t.tgfoid
+        WHERE NOT t.tgisinternal AND n.nspname='auth' AND c.relname='users'
+          AND t.tgname='on_auth_user_created' AND p.proname='handle_new_user'
+    ) THEN
+        RAISE EXCEPTION 'Existing Supabase Auth profile trigger is missing; review Auth setup manually.';
+    END IF;
+END $$;
 
--- 6. Trigger Definition on auth.users
-DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
-CREATE TRIGGER on_auth_user_created
-    AFTER INSERT ON auth.users
-    FOR EACH ROW EXECUTE FUNCTION public.handle_new_user();
-
--- 7. Backfill existing auth.users who may not have a profile yet
-INSERT INTO public.profiles (id, full_name, role)
-SELECT 
-    id, 
-    COALESCE(raw_user_meta_data->>'full_name', ''), 
-    'customer'
-FROM auth.users
-ON CONFLICT (id) DO NOTHING;
+SELECT 'public.profiles exists; signup trigger verified; no schema or Auth objects changed.' AS audit_result;
