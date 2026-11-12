@@ -1,10 +1,10 @@
 from sqlalchemy import create_engine, text
-from sqlalchemy.event import remove as remove_events
-from app.database import SessionLocal, engine, Base
-from app.models import Movie, Screen, MovieShow, Theatre, City
+from app.database import SessionLocal, engine
+from app.models import Movie, Screen, MovieShow, Theatre, City, Base
+from app.models.external import supabase_auth_users
 
-# Remove the event listener that blocks table creation
-remove_events(Base.metadata)
+# Create tables individually to avoid auth.users event listener
+engine = create_engine("sqlite:///./bookings.db", echo=False)
 
 engine = create_engine("sqlite:///./bookings.db", echo=False)
 

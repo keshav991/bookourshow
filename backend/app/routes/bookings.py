@@ -339,7 +339,6 @@ def create_payment_order(
             f"{settings.RAZORPAY_API_URL.rstrip('/')}/orders",
             auth=(key_id, secret),
             json={"amount": amount_minor, "currency": "INR", "receipt": booking.booking_reference,
-                  "expire_by": int(booking.expires_at.timestamp()),
                   "notes": {"booking_id": str(booking.id)}},
             timeout=15.0,
         )
