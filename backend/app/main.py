@@ -50,15 +50,19 @@ def root():
 def health_check():
     return {"status": "healthy"}
 
-
 @app.get("/db-test", tags=["System"])
 def test_database(db: Session = Depends(get_db)):
-    """Health check for PostgreSQL database connectivity."""
-    result = db.execute(
-        text("SELECT current_database()")
-    ).scalar_one()
+    try:
+        result = db.execute(
+            text("SELECT current_database()")
+        ).scalar_one()
 
-    return {
-        "status": "connected",
-        "database": result
-    }
+        return {
+            "status": "connected",
+            "database": result
+        }
+
+    except Exception:
+        import logging
+        logging.exception("Database connection test failed")
+        raise
