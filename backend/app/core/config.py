@@ -6,7 +6,7 @@ from pydantic import Field
 class Settings(BaseSettings):
     SUPABASE_URL: str
     SUPABASE_PUBLISHABLE_KEY: str
-    DATABASE_URL: str = "sqlite:///./bookings.db"
+    DATABASE_URL: str 
     CORS_ORIGINS: str = "http://localhost:5173,http://127.0.0.1:5173"
     RAZORPAY_KEY_ID: str | None = None
     RAZORPAY_KEY_SECRET: str | None = None
