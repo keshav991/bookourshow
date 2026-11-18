@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Link, useNavigate, useParams } from 'react-router-dom';
+import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { apiRequest } from '../lib/api';
 import { useAuth } from '../context/AuthContext';
 
@@ -24,8 +24,9 @@ function loadCheckoutScript() {
 export function BookingDetailsPage() {
   const { bookingId } = useParams();
   const { session } = useAuth();
+  const location = useLocation();
   const navigate = useNavigate();
-  const [booking, setBooking] = useState(null);
+  const [booking, setBooking] = useState(location.state?.booking || null);
   const [error, setError] = useState('');
   const [paymentError, setPaymentError] = useState('');
   const [paying, setPaying] = useState(false);
@@ -34,10 +35,18 @@ export function BookingDetailsPage() {
   const cashIdempotencyKey = useRef(null);
 
   useEffect(() => {
+    if (!session?.access_token) return;
     let active = true;
-    apiRequest(`/bookings/${bookingId}`, session?.access_token)
-      .then((value) => { if (active) setBooking(value); })
-      .catch((reason) => { if (active) setError(reason.message); });
+    apiRequest(`/bookings/${bookingId}`, session.access_token)
+      .then((value) => {
+        if (active) {
+          setBooking(value);
+          setError('');
+        }
+      })
+      .catch((reason) => {
+        if (active) setError(reason.message);
+      });
     return () => { active = false; };
   }, [bookingId, session?.access_token]);
 
@@ -151,6 +160,11 @@ export function BookingDetailsPage() {
         )}
         {isConfirmed && (
           <p>Keep this booking reference for your ticket.</p>
+        )}
+        {!isPending && !isConfirmed && (
+          <p className="booking-summary__error" role="alert">
+            This booking is {String(booking.status || '').toLowerCase()}. The hold has expired or was cancelled, so payment is no longer accepted.
+          </p>
         )}
 
         {paymentError && <p className="booking-summary__error" role="alert">{paymentError}</p>}
