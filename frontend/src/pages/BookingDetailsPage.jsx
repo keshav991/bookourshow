@@ -123,17 +123,19 @@ export function BookingDetailsPage() {
   if (!booking) return <main className="page-container show-page" role="status">Loading booking…</main>;
 
   const isBusy = paying || cashBusy;
+  const isPending = String(booking.status || '').toUpperCase() === 'PENDING';
+  const isConfirmed = String(booking.status || '').toUpperCase() === 'CONFIRMED';
 
   return (
     <main className="page-container show-page">
       <span className="eyebrow eyebrow--red">
-        {booking.status === 'CONFIRMED' ? 'Booking confirmed' : 'Booking created'}
+        {isConfirmed ? 'Booking confirmed' : 'Booking created'}
       </span>
       <h1 className="booking-title">
-        {booking.status === 'CONFIRMED' ? 'Your tickets are confirmed' : 'Your seats are on hold'}
+        {isConfirmed ? 'Your tickets are confirmed' : 'Your seats are on hold'}
       </h1>
       <section className="show-detail-card booking-detail-card">
-        {booking.status === 'PENDING' && (
+        {isPending && (
           <p>Your seats are reserved until {booking.expires_at ? new Date(booking.expires_at).toLocaleString('en-IN') : 'the hold expires'}.</p>
         )}
         <dl>
@@ -144,24 +146,24 @@ export function BookingDetailsPage() {
           <div><dt>Total</dt><dd>{money.format(Number(booking.total_amount))}</dd></div>
         </dl>
 
-        {booking.status === 'PENDING' && (
-          <p>Choose how you want to pay. Cash bookings are confirmed immediately — pay at the counter before the show.</p>
+        {isPending && (
+          <p>Choose your payment method below. You can pay online via Razorpay or choose Cash to pay at the counter before the show.</p>
         )}
-        {booking.status === 'CONFIRMED' && (
+        {isConfirmed && (
           <p>Keep this booking reference for your ticket.</p>
         )}
 
         {paymentError && <p className="booking-summary__error" role="alert">{paymentError}</p>}
 
-        {booking.status === 'PENDING' && (
-          <div className="booking-payment-buttons">
+        {isPending && (
+          <div className="booking-payment-buttons" role="group" aria-label="Payment options">
             <button
               type="button"
               className="button button--primary"
               disabled={isBusy}
               onClick={payForBooking}
             >
-              {paying ? 'Opening secure checkout…' : '💳 Pay securely with Razorpay'}
+              {paying ? 'Opening secure checkout…' : '💳 Pay Securely with Razorpay'}
             </button>
             <button
               type="button"
@@ -174,7 +176,7 @@ export function BookingDetailsPage() {
           </div>
         )}
 
-        {booking.status === 'CONFIRMED' && (
+        {isConfirmed && (
           <Link className="button button--primary" to={`/ticket/${booking.id}`}>
             View ticket
           </Link>

@@ -156,3 +156,329 @@
   .profile-booking { align-items: flex-start; flex-direction: column; }
   .booking-detail-card dl { grid-template-columns: 1fr; }
 }
+
+
+/* ── Cash payment and Ticket styles ────────────────────────────────────────── */
+
+.booking-payment-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 18px;
+}
+
+.button--cash {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  padding: 10px 22px;
+  border: 1px solid #2e7d32;
+  border-radius: 6px;
+  color: #fff;
+  background: #2e7d32;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.18s, border-color 0.18s, transform 0.15s;
+}
+
+.button--cash:hover:not(:disabled) {
+  background: #1b5e20;
+  border-color: #1b5e20;
+  transform: translateY(-1px);
+}
+
+.button--cash:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+}
+
+/* Ticket presentation page */
+.ticket-page {
+  max-width: 680px;
+  margin-inline: auto;
+}
+
+.ticket-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 24px;
+}
+
+.ticket-card {
+  position: relative;
+  padding: 32px;
+  border: 2px dashed #e0e0e0;
+  border-radius: 14px;
+  background: #ffffff;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.05);
+}
+
+.ticket-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 24px;
+  padding-bottom: 16px;
+  border-bottom: 2px solid #111827;
+}
+
+.ticket-brand {
+  font-size: 20px;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  color: #e53935;
+}
+
+.ticket-label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.15em;
+  color: #6b7280;
+  text-transform: uppercase;
+}
+
+.ticket-poster-row {
+  display: flex;
+  gap: 20px;
+  align-items: center;
+  margin-bottom: 20px;
+}
+
+.ticket-poster {
+  width: 90px;
+  height: 128px;
+  border-radius: 8px;
+  object-fit: cover;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  background: #f3f4f6;
+  flex-shrink: 0;
+}
+
+.ticket-movie-title {
+  margin: 0 0 6px;
+  font-size: 24px;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  color: #111827;
+}
+
+.ticket-meta {
+  margin: 0;
+  font-size: 13px;
+  color: #6b7280;
+  font-weight: 500;
+}
+
+.ticket-divider {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 18px 0;
+  color: #d1d5db;
+  font-size: 12px;
+}
+
+.ticket-divider::before,
+.ticket-divider::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: #e5e7eb;
+}
+
+.ticket-divider span {
+  padding: 0 10px;
+  color: #9ca3af;
+}
+
+.ticket-details {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px 24px;
+}
+
+.ticket-row {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.ticket-row__label {
+  font-size: 11px;
+  font-weight: 600;
+  color: #9ca3af;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.ticket-row__value {
+  font-size: 14px;
+  font-weight: 700;
+  color: #1f2937;
+  word-break: break-word;
+}
+
+.ticket-payment-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 20px;
+  margin-top: 20px;
+  padding: 16px;
+  border-radius: 10px;
+  background: #f9fafb;
+}
+
+.ticket-payment-method {
+  font-size: 14px;
+  font-weight: 700;
+  color: #111827;
+  margin-bottom: 4px;
+}
+
+.ticket-payment-status {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  margin-bottom: 8px;
+}
+
+.ticket-payment-status--pending {
+  color: #d97706;
+}
+
+.ticket-payment-status--paid {
+  color: #059669;
+}
+
+.ticket-badge {
+  display: inline-block;
+  padding: 4px 10px;
+  border-radius: 9999px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+}
+
+.ticket-badge--confirmed {
+  background: #ecfdf5;
+  color: #059669;
+  border: 1px solid #a7f3d0;
+}
+
+.ticket-badge--pending {
+  background: #fffbeb;
+  color: #d97706;
+  border: 1px solid #fde68a;
+}
+
+.ticket-qr {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.ticket-qr__hint {
+  margin: 6px 0 0;
+  font-size: 10px;
+  color: #6b7280;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.ticket-cash-notice {
+  margin-top: 18px;
+  padding: 12px 16px;
+  border-left: 4px solid #f59e0b;
+  border-radius: 6px;
+  background: #fffbeb;
+  color: #92400e;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.ticket-footer {
+  margin-top: 24px;
+  padding-top: 14px;
+  border-top: 1px solid #f3f4f6;
+  font-size: 11px;
+  color: #9ca3af;
+  text-align: center;
+}
+
+/* Verification page */
+.ticket-verify-page {
+  max-width: 560px;
+  margin-inline: auto;
+}
+
+.ticket-verify-card {
+  padding: 32px;
+  border-radius: 14px;
+  background: #ffffff;
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.05);
+  border: 1px solid #e5e7eb;
+  text-align: center;
+}
+
+.ticket-verify-card--valid {
+  border-top: 6px solid #10b981;
+}
+
+.ticket-verify-card--invalid {
+  border-top: 6px solid #ef4444;
+}
+
+.ticket-verify-icon {
+  font-size: 40px;
+  margin-bottom: 12px;
+}
+
+.ticket-verify-title {
+  margin: 0 0 6px;
+  font-size: 22px;
+  font-weight: 800;
+}
+
+.ticket-verify-ref {
+  margin: 0;
+  font-size: 13px;
+  color: #6b7280;
+  font-family: monospace;
+}
+
+.ticket-verify-card .ticket-details {
+  text-align: left;
+}
+
+/* Print Styles */
+@media print {
+  body {
+    background: #ffffff !important;
+  }
+  .site-header,
+  .site-footer,
+  .secondary-navbar,
+  .ticket-actions,
+  .no-print {
+    display: none !important;
+  }
+  .page-container,
+  .ticket-page {
+    max-width: 100% !important;
+    padding: 0 !important;
+    margin: 0 !important;
+  }
+  .ticket-card {
+    border: 2px solid #000000 !important;
+    box-shadow: none !important;
+    page-break-inside: avoid;
+    padding: 24px !important;
+  }
+}

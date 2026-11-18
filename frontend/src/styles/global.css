@@ -32,6 +32,17 @@ img { display: block; max-width: 100%; }
 .button:hover { transform: translateY(-1px); }
 .button--primary { color: #fff; background: var(--brand); }
 .button--primary:hover { background: var(--brand-dark); }
+.button--cash { color: #fff; background: #2e7d32; border-color: #2e7d32; }
+.button--cash:hover:not(:disabled) { background: #1b5e20; border-color: #1b5e20; transform: translateY(-1px); }
+.button--cash:disabled { opacity: 0.65; cursor: not-allowed; }
+
+.booking-payment-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin-top: 18px;
+}
 .button--premium {
   color: #fff;
   background: var(--brand);

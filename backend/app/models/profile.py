@@ -28,11 +28,11 @@ class Profile(Base):
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
-        server_default=text("timezone('utc'::text, now())"),
+        server_default=func.now(),
         nullable=False
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
-        server_default=text("timezone('utc'::text, now())"),
+        server_default=func.now(),
         nullable=False
     )

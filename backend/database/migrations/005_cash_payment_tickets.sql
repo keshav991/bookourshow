@@ -1,5 +1,6 @@
 -- Migration 005: Add cash payment support and ticket tokens.
 -- Adds payment_method column to bookings, allows CASH provider in payments,
+-- updates enforce_booking_transition() trigger to permit cash confirmations,
 -- and creates the tickets table for QR-based verification.
 -- Safe to re-run (all statements are idempotent).
 BEGIN;
@@ -22,9 +23,47 @@ BEGIN
     END IF;
 END $$;
 
--- 2. Drop the existing payments status check and recreate it with no changes
---    (provider column has no CHECK, so CASH is already valid there).
---    Nothing needed for provider — the existing column is unconstrained.
+-- 2. Update enforce_booking_transition() trigger function
+--    to allow CONFIRMED status when payment_method is CASH and payment provider is CASH.
+CREATE OR REPLACE FUNCTION public.enforce_booking_transition()
+RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+    IF NEW.status = OLD.status THEN RETURN NEW; END IF;
+
+    -- For Razorpay / standard online bookings, a captured payment is required
+    IF NEW.status = 'CONFIRMED' THEN
+        IF NEW.payment_method = 'CASH' THEN
+            IF NOT EXISTS (
+                SELECT 1 FROM public.payments p
+                WHERE p.booking_id = NEW.id AND p.provider = 'CASH'
+            ) THEN
+                RAISE EXCEPTION 'A cash booking requires an active cash payment record before confirmation';
+            END IF;
+        ELSE
+            IF NOT EXISTS (
+                SELECT 1 FROM public.payments p
+                WHERE p.booking_id = NEW.id AND p.status = 'CAPTURED'
+            ) THEN
+                RAISE EXCEPTION 'A booking requires a captured payment before confirmation';
+            END IF;
+        END IF;
+    END IF;
+
+    IF OLD.status = 'CONFIRMED' AND NEW.status = 'CANCELLED' AND EXISTS (
+        SELECT 1 FROM public.payments p WHERE p.booking_id = NEW.id AND p.status = 'CAPTURED'
+    ) THEN
+        RAISE EXCEPTION 'Captured payments must be refunded before cancelling a booking';
+    END IF;
+
+    IF NOT (
+        (OLD.status = 'PENDING' AND NEW.status IN ('CONFIRMED', 'CANCELLED', 'EXPIRED')) OR
+        (OLD.status = 'CONFIRMED' AND NEW.status = 'CANCELLED')
+    ) THEN
+        RAISE EXCEPTION 'Invalid booking status transition: % -> %', OLD.status, NEW.status;
+    END IF;
+
+    RETURN NEW;
+END $$;
 
 -- 3. Create the tickets table for QR-code / token-based verification.
 CREATE TABLE IF NOT EXISTS public.tickets (
@@ -39,3 +78,4 @@ CREATE TABLE IF NOT EXISTS public.tickets (
 CREATE INDEX IF NOT EXISTS ix_tickets_token ON public.tickets (token);
 
 COMMIT;
+

@@ -20,6 +20,7 @@ from fastapi.testclient import TestClient
 from app.database import Base
 from app.core.config import settings
 from app.models.booking import Booking, BookingSeat, Payment
+from app.models.ticket import Ticket
 from app.models.show import MovieShow, ShowSeat
 from app.models.theatre import Seat
 from app.schemas.booking import BookingCreateRequest, SeatLockRequest
@@ -174,7 +175,7 @@ class TestBookingDatabaseFoundation(unittest.TestCase):
 class TestSeatLockApi(unittest.TestCase):
     def setUp(self):
         self.engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
-        self.tables = [MovieShow.__table__, Booking.__table__, ShowSeat.__table__, Seat.__table__, BookingSeat.__table__, Payment.__table__]
+        self.tables = [MovieShow.__table__, Booking.__table__, ShowSeat.__table__, Seat.__table__, BookingSeat.__table__, Payment.__table__, Ticket.__table__]
         Base.metadata.create_all(self.engine, tables=self.tables)
         self.Session = lambda: Session(self.engine, expire_on_commit=False)
         with self.Session() as db:

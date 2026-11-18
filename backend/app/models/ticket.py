@@ -3,7 +3,7 @@ from decimal import Decimal
 from uuid import UUID
 
 from sqlalchemy import (
-    BigInteger, DateTime, ForeignKey, Identity, Index, Text, UniqueConstraint, func,
+    BigInteger, DateTime, ForeignKey, Identity, Index, Integer, Text, UniqueConstraint, func,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -22,7 +22,7 @@ class Ticket(Base):
         Index("ix_tickets_token", "token"),
     )
 
-    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    id: Mapped[int] = mapped_column(BigInteger().with_variant(Integer, "sqlite"), Identity(), primary_key=True)
     booking_id: Mapped[int] = mapped_column(
         ForeignKey("bookings.id", name="fk_tickets_booking", ondelete="RESTRICT"),
         nullable=False,

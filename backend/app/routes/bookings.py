@@ -476,8 +476,12 @@ def _finalize_captured_payment(db: Session, payment: Payment, booking: Booking, 
         seat.locked_until = None
     payment.provider_payment_id = payment_id
     payment.status = "CAPTURED"
+    booking.payment_method = "RAZORPAY"
     booking.status = "CONFIRMED"
     booking.expires_at = None
+    if not db.scalar(select(Ticket.id).where(Ticket.booking_id == booking.id)):
+        token = secrets.token_urlsafe(32)
+        db.add(Ticket(booking_id=booking.id, token=token))
     _commit(db, "Payment could not be finalized; retry verification with the same provider IDs")
 
 
@@ -724,15 +728,7 @@ def cash_confirm_booking(
         raise HTTPException(status_code=409, detail="Booking total mismatch; please restart the booking")
 
     # 8. Atomic confirmation
-    for seat in seats:
-        seat.status = "BOOKED"
-        seat.locked_by = None
-        seat.locked_until = None
-
-    booking.status = "CONFIRMED"
-    booking.payment_method = "CASH"
-    booking.expires_at = None
-
+    # Add CASH payment record first so triggers can observe it during status update
     payment = Payment(
         booking_id=booking.id,
         provider="CASH",
@@ -741,6 +737,16 @@ def cash_confirm_booking(
         idempotency_key=payload.idempotency_key,
     )
     db.add(payment)
+    db.flush()
+
+    for seat in seats:
+        seat.status = "BOOKED"
+        seat.locked_by = None
+        seat.locked_until = None
+
+    booking.status = "CONFIRMED"
+    booking.payment_method = "CASH"
+    booking.expires_at = None
 
     token = secrets.token_urlsafe(32)
     ticket = Ticket(booking_id=booking.id, token=token)

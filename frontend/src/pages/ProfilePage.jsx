@@ -64,7 +64,11 @@ export function ProfilePage() {
       {bookings.length === 0 && !bookingError ? <p>No bookings yet.</p> : null}
       {bookings.map((booking) => <article className="profile-booking" key={booking.id}>
         <div><strong>{booking.booking_reference}</strong><span>{booking.seats.map((seat) => `${seat.row_label}${seat.seat_number}`).join(', ')} · ₹{Number(booking.total_amount).toFixed(2)}</span><small>{booking.status} · {new Date(booking.created_at).toLocaleString()}</small></div>
-        <div><button className="button button--quiet" type="button" onClick={() => navigate(`/booking/${booking.id}`)}>View</button>
+        <div>
+          {booking.status === 'CONFIRMED' ? (
+            <button className="button button--primary" type="button" style={{ marginRight: '0.5rem' }} onClick={() => navigate(`/ticket/${booking.id}`)}>Ticket</button>
+          ) : null}
+          <button className="button button--quiet" type="button" onClick={() => navigate(`/booking/${booking.id}`)}>View</button>
           {booking.status === 'PENDING' ? <button className="button button--quiet" type="button" disabled={cancellingId === booking.id} onClick={() => cancelBooking(booking.id)}>{cancellingId === booking.id ? 'Cancelling…' : 'Cancel'}</button> : null}</div>
       </article>)}
     </section>

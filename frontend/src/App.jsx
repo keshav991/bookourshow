@@ -17,6 +17,8 @@ import { ResetPasswordPage } from './pages/ResetPasswordPage';
 import { MovieShowsPage } from './pages/MovieShowsPage';
 import { ShowDetailsPage } from './pages/ShowDetailsPage';
 import { BookingDetailsPage } from './pages/BookingDetailsPage';
+import { TicketPage } from './pages/TicketPage';
+import { TicketVerifyPage } from './pages/TicketVerifyPage';
 
 function SiteLayout() {
   const [searchQuery, setSearchQuery] = useState('');
@@ -43,6 +45,8 @@ export default function App() {
           <Route path="movie/:movieId/shows" element={<MovieShowsPage />} />
           <Route path="show/:showId" element={<ShowDetailsPage />} />
           <Route path="booking/:bookingId" element={<ProtectedRoute><BookingDetailsPage /></ProtectedRoute>} />
+          <Route path="ticket/:bookingId" element={<ProtectedRoute><TicketPage /></ProtectedRoute>} />
+          <Route path="tickets/verify/:token" element={<TicketVerifyPage />} />
           <Route path="login" element={<LoginPage />} />
           <Route path="register" element={<RegisterPage />} />
           <Route path="auth/callback" element={<AuthCallbackPage />} />
