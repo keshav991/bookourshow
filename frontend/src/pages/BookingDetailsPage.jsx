@@ -55,8 +55,11 @@ export function BookingDetailsPage() {
   async function cancelBooking() {
     if (!booking || !session?.access_token || cancelling) return;
     const confirmedCash = String(booking.status).toUpperCase() === 'CONFIRMED' && booking.payment_method === 'CASH';
+    const cutoffText = booking.cancellation_cutoff_at
+      ? ` Cancellation is available until ${new Date(booking.cancellation_cutoff_at).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })}.`
+      : '';
     const prompt = confirmedCash
-      ? 'Cancel this cash ticket? The booking and QR ticket will become invalid. Any counter refund must be handled by theatre staff.'
+      ? `Cancel this cash ticket? The booking and QR ticket will become invalid.${cutoffText} Any counter refund must be handled by theatre staff.`
       : 'Cancel this pending booking and release its seats?';
     if (!window.confirm(prompt)) return;
     setCancelling(true); setError(''); setPaymentError('');
@@ -100,7 +103,8 @@ export function BookingDetailsPage() {
             {cancelling ? 'Cancelling…' : 'Cancel booking'}
           </button>
         )}
-        {isConfirmed && booking.payment_method === 'CASH' && <p>Cash tickets can be cancelled before the showtime cutoff. Any refund for cash already collected must be handled by theatre staff.</p>}
+        {booking.payment_status && <p>Payment status: {booking.payment_status}</p>}
+        {isConfirmed && booking.payment_method === 'CASH' && <p>Cash tickets can be cancelled until {booking.cancellation_cutoff_at ? new Date(booking.cancellation_cutoff_at).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' }) : 'the configured showtime cutoff'} IST. Any refund for cash already collected must be handled by theatre staff.</p>}
         {isConfirmed && booking.payment_method === 'CASH' && (
           <button type="button" className="button button--quiet" disabled={cancelling} onClick={cancelBooking}>
             {cancelling ? 'Cancelling…' : 'Cancel ticket'}

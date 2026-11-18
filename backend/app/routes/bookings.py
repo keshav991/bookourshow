@@ -62,6 +62,16 @@ def _commit(db: Session, conflict_message: str = "The request conflicts with cur
 
 
 def _booking_response(db: Session, booking: Booking) -> BookingResponse:
+    show = db.get(MovieShow, booking.show_id)
+    payment = db.scalar(select(Payment).where(
+        Payment.booking_id == booking.id
+    ).order_by(Payment.created_at.desc()).limit(1))
+    payment_status = None
+    if payment is not None:
+        if payment.provider == "CASH" and booking.status in {"CANCELLED", "EXPIRED"}:
+            payment_status = booking.status
+        else:
+            payment_status = "PENDING_PAYMENT" if payment.provider == "CASH" and payment.status == "CREATED" else payment.status
     rows = db.execute(
         select(BookingSeat, Seat)
         .join(ShowSeat, ShowSeat.id == BookingSeat.show_seat_id)
@@ -76,6 +86,8 @@ def _booking_response(db: Session, booking: Booking) -> BookingResponse:
         total_amount=booking.total_amount,
         status=booking.status,
         payment_method=booking.payment_method,
+        payment_status=payment_status,
+        cancellation_cutoff_at=(show.start_time - timedelta(minutes=settings.CANCELLATION_CUTOFF_MINUTES)) if show else None,
         expires_at=booking.expires_at,
         created_at=booking.created_at,
         seats=[BookingSeatResponse(
@@ -623,6 +635,7 @@ def _build_cash_ticket(
         show_date=_ist_date(show.start_time),
         show_start_time=_ist_time(show.start_time),
         show_end_time=_ist_time(show.end_time),
+        cancellation_cutoff_at=show.start_time - timedelta(minutes=settings.CANCELLATION_CUTOFF_MINUTES),
         seats=seats,
         seat_labels=seat_labels,
         seat_count=len(seats),

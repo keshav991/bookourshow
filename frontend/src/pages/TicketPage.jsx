@@ -65,7 +65,10 @@ export function TicketPage() {
 
   async function cancelTicket() {
     if (!ticket || cancelling) return;
-    if (!window.confirm('Cancel this ticket? It will no longer pass QR verification. Any counter refund must be handled by theatre staff.')) return;
+    const cutoffText = ticket.cancellation_cutoff_at
+      ? ` Cancellation is available until ${new Date(ticket.cancellation_cutoff_at).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })} IST.`
+      : '';
+    if (!window.confirm(`Cancel this ticket? It will no longer pass QR verification.${cutoffText} Any counter refund must be handled by theatre staff.`)) return;
     setCancelling(true);
     try {
       await apiRequest(`/bookings/${bookingId}/cancel`, session.access_token, { method: 'POST' });

@@ -54,6 +54,8 @@ class BookingResponse(BaseModel):
     total_amount: Decimal
     status: str
     payment_method: str | None = None
+    payment_status: str | None = None
+    cancellation_cutoff_at: datetime | None = None
     expires_at: datetime | None
     created_at: datetime
     seats: list[BookingSeatResponse]
@@ -129,6 +131,7 @@ class CashTicketResponse(BaseModel):
     show_date: str          # "YYYY-MM-DD" in IST
     show_start_time: str    # human-readable IST
     show_end_time: str
+    cancellation_cutoff_at: datetime
 
     # Seat list
     seats: list[TicketSeatInfo]

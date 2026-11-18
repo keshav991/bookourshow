@@ -183,6 +183,10 @@ class TestCashBookingWorkflow(unittest.TestCase):
         cancelled = self.client.post(f"/bookings/{booking_id}/cancel")
         self.assertEqual(cancelled.status_code, 200, cancelled.text)
         self.assertEqual(cancelled.json()["status"], "CANCELLED")
+        self.assertEqual(cancelled.json()["payment_status"], "CANCELLED")
+        repeated = self.client.post(f"/bookings/{booking_id}/cancel")
+        self.assertEqual(repeated.status_code, 200, repeated.text)
+        self.assertEqual(repeated.json()["status"], "CANCELLED")
         with self.Session() as db:
             self.assertEqual(db.get(Booking, booking_id).status, "CANCELLED")
             self.assertEqual(db.scalar(select(Ticket).where(Ticket.booking_id == booking_id)).token, ticket["ticket_token"])
@@ -193,7 +197,7 @@ class TestCashBookingWorkflow(unittest.TestCase):
         self.assertEqual(verified.status_code, 200, verified.text)
         self.assertFalse(verified.json()["is_valid"])
         self.assertEqual(verified.json()["booking_status"], "CANCELLED")
-        self.assertEqual(verified.json()["payment_status"], "PENDING_PAYMENT")
+        self.assertEqual(verified.json()["payment_status"], "CANCELLED")
         relocked = self.client.post("/shows/40/seats/lock", json={"show_seat_ids": [201, 202]})
         self.assertEqual(relocked.status_code, 201, relocked.text)
         rebooked = self.client.post("/bookings/shows/40", json={

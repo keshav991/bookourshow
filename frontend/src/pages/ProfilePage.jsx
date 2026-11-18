@@ -28,8 +28,11 @@ export function ProfilePage() {
   async function cancelBooking(bookingId) {
     const target = bookings.find((item) => item.id === bookingId);
     const confirmedCash = target?.status === 'CONFIRMED' && target?.payment_method === 'CASH';
+    const cutoffText = target?.cancellation_cutoff_at
+      ? ` Cancellation is available until ${new Date(target.cancellation_cutoff_at).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })} IST.`
+      : '';
     const prompt = confirmedCash
-      ? 'Cancel this cash ticket? The ticket will become invalid. Any counter refund must be handled by theatre staff.'
+      ? `Cancel this cash ticket? The ticket will become invalid.${cutoffText} Any counter refund must be handled by theatre staff.`
       : 'Cancel this pending booking and release its seats?';
     if (!window.confirm(prompt)) return;
     setCancellingId(bookingId); setBookingError(''); setBookingMessage('');
@@ -72,7 +75,7 @@ export function ProfilePage() {
       {bookingMessage ? <AuthMessage type="success">{bookingMessage}</AuthMessage> : null}
       {bookings.length === 0 && !bookingError ? <p>No bookings yet.</p> : null}
       {bookings.map((booking) => <article className="profile-booking" key={booking.id}>
-        <div><strong>{booking.booking_reference}</strong><span>{booking.seats.map((seat) => `${seat.row_label}${seat.seat_number}`).join(', ')} · ₹{Number(booking.total_amount).toFixed(2)}</span><small>{booking.status} · {new Date(booking.created_at).toLocaleString()}</small></div>
+        <div><strong>{booking.booking_reference}</strong><span>{booking.seats.map((seat) => `${seat.row_label}${seat.seat_number}`).join(', ')} · ₹{Number(booking.total_amount).toFixed(2)}</span><small>{booking.status}{booking.payment_status ? ` · ${booking.payment_status}` : ''} · {new Date(booking.created_at).toLocaleString()}</small></div>
         <div>
           {booking.status === 'CONFIRMED' ? (
             <button className="button button--primary" type="button" style={{ marginRight: '0.5rem' }} onClick={() => navigate(`/ticket/${booking.id}`)}>Ticket</button>

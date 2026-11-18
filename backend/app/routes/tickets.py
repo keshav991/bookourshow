@@ -87,7 +87,10 @@ def verify_ticket(token: str = Path(min_length=8, max_length=128), db: Session =
         .limit(1)
     )
     if payment is not None:
-        payment_status = "PENDING_PAYMENT" if payment.provider == "CASH" and payment.status == "CREATED" else payment.status
+        if payment.provider == "CASH" and booking.status in {"CANCELLED", "EXPIRED"}:
+            payment_status = booking.status
+        else:
+            payment_status = "PENDING_PAYMENT" if payment.provider == "CASH" and payment.status == "CREATED" else payment.status
     else:
         payment_status = "PENDING_PAYMENT"
 
