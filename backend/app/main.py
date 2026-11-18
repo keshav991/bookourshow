@@ -9,6 +9,7 @@ from app.routes.auth import router as auth_router
 from app.routes.users import router as users_router
 from app.routes.shows import cities_router, movies_router, router as shows_router, theatres_router
 from app.routes.bookings import router as bookings_router, seat_lock_router, webhook_router
+from app.routes.tickets import router as tickets_router
 
 app = FastAPI(
     title="BookOurShow API",
@@ -35,6 +36,7 @@ app.include_router(shows_router)
 app.include_router(seat_lock_router)
 app.include_router(bookings_router)
 app.include_router(webhook_router)
+app.include_router(tickets_router)
 
 
 @app.get("/", tags=["System"])

@@ -53,6 +53,7 @@ class BookingResponse(BaseModel):
     show_id: int
     total_amount: Decimal
     status: str
+    payment_method: str | None = None
     expires_at: datetime | None
     created_at: datetime
     seats: list[BookingSeatResponse]
@@ -89,3 +90,66 @@ class PaymentResponse(BaseModel):
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+
+# ── Cash payment ──────────────────────────────────────────────────────────────
+
+class CashConfirmRequest(BaseModel):
+    """Idempotency key supplied by the client to prevent duplicate confirmations."""
+    idempotency_key: str = Field(min_length=8, max_length=128)
+
+
+class TicketSeatInfo(BaseModel):
+    row_label: str
+    seat_number: int
+    seat_type: str
+    price: Decimal
+
+
+class CashTicketResponse(BaseModel):
+    """Full ticket returned after a cash booking is confirmed."""
+    booking_id: int
+    booking_reference: str
+    ticket_token: str
+    status: str
+    payment_method: str
+    payment_status: str
+    total_amount: Decimal
+    created_at: datetime
+
+    # Show / movie / venue
+    movie_title: str
+    movie_poster_url: str | None
+    movie_duration_minutes: int | None
+    movie_certification: str | None
+    theatre_name: str
+    theatre_address: str
+    theatre_city: str
+    screen_name: str
+    show_date: str          # "YYYY-MM-DD" in IST
+    show_start_time: str    # human-readable IST
+    show_end_time: str
+
+    # Seat list
+    seats: list[TicketSeatInfo]
+    seat_labels: str        # e.g. "A1, A2, B3"
+    seat_count: int
+
+    # Customer name (from profile; may be blank)
+    customer_name: str | None
+
+
+class TicketVerifyResponse(BaseModel):
+    """Minimal public verification response — no PII beyond booking status."""
+    token: str
+    booking_reference: str
+    booking_status: str
+    payment_method: str | None
+    payment_status: str     # PENDING_PAYMENT | CAPTURED | etc.
+    show_date: str
+    show_start_time: str
+    theatre_name: str
+    movie_title: str
+    seat_labels: str
+    is_valid: bool
+

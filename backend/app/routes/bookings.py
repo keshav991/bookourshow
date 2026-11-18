@@ -2,6 +2,7 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 import json
 import secrets
+from zoneinfo import ZoneInfo
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Path, Request
@@ -13,12 +14,15 @@ from app.core.config import settings
 from app.database import get_db
 from app.dependencies.auth import get_current_user
 from app.models.booking import Booking, BookingSeat, Payment
+from app.models.movie import Movie
+from app.models.profile import Profile
 from app.models.show import MovieShow, ShowSeat
-from app.models.theatre import Seat
+from app.models.theatre import City, Screen, Seat, Theatre
+from app.models.ticket import Ticket
 from app.schemas.booking import (
-    BookingCreateRequest, BookingResponse, BookingSeatResponse, PaymentOrderRequest,
-    PaymentOrderResponse, PaymentResponse, PaymentVerifyRequest, SeatLock,
-    SeatLockRequest, SeatReleaseResponse,
+    BookingCreateRequest, BookingResponse, BookingSeatResponse, CashConfirmRequest,
+    CashTicketResponse, PaymentOrderRequest, PaymentOrderResponse, PaymentResponse,
+    PaymentVerifyRequest, SeatLock, SeatLockRequest, SeatReleaseResponse, TicketSeatInfo,
 )
 from app.schemas.user import AuthenticatedUser
 from app.services.booking_service import SeatsUnavailableError, acquire_seat_locks
@@ -27,6 +31,8 @@ from app.services.payment_service import razorpay_signature_matches, razorpay_we
 router = APIRouter(prefix="/bookings", tags=["Bookings"])
 seat_lock_router = APIRouter(prefix="/shows", tags=["Seat reservations"])
 webhook_router = APIRouter(prefix="/webhooks", tags=["Payment webhooks"])
+
+INDIA_TZ = ZoneInfo("Asia/Kolkata")
 
 
 def _database_utc_now(db: Session) -> datetime:
@@ -69,6 +75,7 @@ def _booking_response(db: Session, booking: Booking) -> BookingResponse:
         show_id=booking.show_id,
         total_amount=booking.total_amount,
         status=booking.status,
+        payment_method=booking.payment_method,
         expires_at=booking.expires_at,
         created_at=booking.created_at,
         seats=[BookingSeatResponse(
@@ -530,3 +537,253 @@ async def receive_razorpay_webhook(request: Request, db: Session = Depends(get_d
         _finalize_captured_payment(db, payment, booking, payment_id)
         return {"received": True, "confirmed": True}
     return {"received": True, "ignored": True}
+
+
+
+# ── Helpers for cash / ticket responses ──────────────────────────────────────
+
+def _utc(dt: datetime) -> datetime:
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
+def _ist_date(dt: datetime) -> str:
+    return _utc(dt).astimezone(INDIA_TZ).strftime("%Y-%m-%d")
+
+
+def _ist_time(dt: datetime) -> str:
+    return _utc(dt).astimezone(INDIA_TZ).strftime("%I:%M %p")
+
+
+def _build_cash_ticket(
+    db: Session,
+    booking: Booking,
+    ticket: Ticket,
+    payment: Payment,
+) -> CashTicketResponse:
+    """Assemble the full CashTicketResponse from related records."""
+    row = db.execute(
+        select(MovieShow, Movie, Screen, Theatre, City)
+        .join(Movie, MovieShow.movie_id == Movie.id)
+        .join(Screen, MovieShow.screen_id == Screen.id)
+        .join(Theatre, Screen.theatre_id == Theatre.id)
+        .join(City, Theatre.city_id == City.id)
+        .where(MovieShow.id == booking.show_id)
+    ).first()
+    if row is None:
+        raise HTTPException(status_code=500, detail="Show record missing for this booking")
+    show, movie, screen, theatre, city = row
+
+    seat_rows = db.execute(
+        select(BookingSeat, Seat)
+        .join(ShowSeat, ShowSeat.id == BookingSeat.show_seat_id)
+        .join(Seat, Seat.id == ShowSeat.seat_id)
+        .where(BookingSeat.booking_id == booking.id)
+        .order_by(Seat.row_label, Seat.seat_number)
+    ).all()
+
+    seats = [
+        TicketSeatInfo(
+            row_label=seat.row_label,
+            seat_number=seat.seat_number,
+            seat_type=seat.seat_type,
+            price=bs.price,
+        )
+        for bs, seat in seat_rows
+    ]
+    seat_labels = ", ".join(f"{s.row_label}{s.seat_number}" for s in seats)
+
+    # Customer name from profiles (best-effort)
+    profile = db.scalar(select(Profile).where(Profile.id == booking.user_id))
+    customer_name = profile.full_name if profile else None
+
+    return CashTicketResponse(
+        booking_id=booking.id,
+        booking_reference=booking.booking_reference,
+        ticket_token=ticket.token,
+        status=booking.status,
+        payment_method=booking.payment_method or "CASH",
+        payment_status=payment.status,
+        total_amount=booking.total_amount,
+        created_at=booking.created_at,
+        movie_title=movie.title,
+        movie_poster_url=movie.poster_url,
+        movie_duration_minutes=movie.duration_minutes,
+        movie_certification=movie.certification,
+        theatre_name=theatre.name,
+        theatre_address=f"{theatre.address}, {city.name}",
+        theatre_city=city.name,
+        screen_name=screen.name,
+        show_date=_ist_date(show.start_time),
+        show_start_time=_ist_time(show.start_time),
+        show_end_time=_ist_time(show.end_time),
+        seats=seats,
+        seat_labels=seat_labels,
+        seat_count=len(seats),
+        customer_name=customer_name,
+    )
+
+
+# ── Cash confirmation endpoint ────────────────────────────────────────────────
+
+@router.post(
+    "/{booking_id}/cash-confirmation",
+    response_model=CashTicketResponse,
+    status_code=201,
+    summary="Confirm booking with cash payment",
+    description=(
+        "Confirms a PENDING booking as a cash (pay-at-counter) booking. "
+        "Verifies seat ownership, transitions seats to BOOKED, sets booking status "
+        "to CONFIRMED with payment_method=CASH, creates a Payment record "
+        "(provider=CASH, status=CREATED) and an opaque ticket token for QR verification. "
+        "Idempotent: repeating with the same idempotency_key returns the existing ticket."
+    ),
+)
+def cash_confirm_booking(
+    payload: CashConfirmRequest,
+    booking_id: int = Path(gt=0),
+    current_user: AuthenticatedUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    # 1. Load booking with row-level lock
+    booking = db.scalar(
+        select(Booking)
+        .where(Booking.id == booking_id, Booking.user_id == current_user.id)
+        .with_for_update()
+    )
+    if booking is None:
+        raise HTTPException(status_code=404, detail="Booking not found")
+
+    # 2. Idempotency: already confirmed as cash?
+    existing_ticket = db.scalar(select(Ticket).where(Ticket.booking_id == booking.id))
+    if existing_ticket is not None:
+        payment = db.scalar(
+            select(Payment)
+            .where(Payment.booking_id == booking.id, Payment.provider == "CASH")
+            .order_by(Payment.created_at.desc())
+        )
+        db.rollback()
+        if payment is None:
+            raise HTTPException(status_code=409, detail="Ticket exists but payment record is missing")
+        return _build_cash_ticket(db, booking, existing_ticket, payment)
+
+    # 3. Must be PENDING
+    if booking.status != "PENDING":
+        raise HTTPException(
+            status_code=409,
+            detail=f"Booking is {booking.status} and cannot be confirmed",
+        )
+
+    # 4. Must not have expired
+    now = _database_utc_now(db)
+    if booking.expires_at is not None and _as_utc(booking.expires_at) <= now:
+        raise HTTPException(status_code=409, detail="Seat hold has expired; start a new booking")
+
+    # 5. No active Razorpay payment
+    active_razorpay = db.scalar(
+        select(Payment.id).where(
+            Payment.booking_id == booking.id,
+            Payment.provider == "RAZORPAY",
+            Payment.status.in_(["CREATED", "AUTHORIZED"]),
+        ).limit(1)
+    )
+    if active_razorpay is not None:
+        raise HTTPException(
+            status_code=409,
+            detail="A Razorpay payment is in progress; cancel it before choosing cash",
+        )
+
+    # 6. Verify all seats locked by this user and unexpired
+    seats = db.scalars(
+        select(ShowSeat)
+        .where(ShowSeat.booking_id == booking.id)
+        .order_by(ShowSeat.id)
+        .with_for_update()
+    ).all()
+
+    if not seats:
+        raise HTTPException(status_code=409, detail="No seat reservations found for this booking")
+
+    bad = [
+        s for s in seats
+        if s.status != "LOCKED"
+        or s.locked_by != current_user.id
+        or s.locked_until is None
+        or _as_utc(s.locked_until) <= now
+    ]
+    if bad:
+        raise HTTPException(
+            status_code=409,
+            detail="One or more seat reservations have expired or belong to another session",
+        )
+
+    # 7. Recalculate total from authoritative DB data
+    db_total = sum((s.price for s in seats), Decimal("0.00"))
+    if db_total != booking.total_amount:
+        raise HTTPException(status_code=409, detail="Booking total mismatch; please restart the booking")
+
+    # 8. Atomic confirmation
+    for seat in seats:
+        seat.status = "BOOKED"
+        seat.locked_by = None
+        seat.locked_until = None
+
+    booking.status = "CONFIRMED"
+    booking.payment_method = "CASH"
+    booking.expires_at = None
+
+    payment = Payment(
+        booking_id=booking.id,
+        provider="CASH",
+        amount=booking.total_amount,
+        status="CREATED",
+        idempotency_key=payload.idempotency_key,
+    )
+    db.add(payment)
+
+    token = secrets.token_urlsafe(32)
+    ticket = Ticket(booking_id=booking.id, token=token)
+    db.add(ticket)
+
+    _commit(db, "Cash confirmation failed due to a concurrent change; please retry")
+    db.refresh(booking)
+    db.refresh(payment)
+    db.refresh(ticket)
+
+    return _build_cash_ticket(db, booking, ticket, payment)
+
+
+@router.get(
+    "/{booking_id}/ticket",
+    response_model=CashTicketResponse,
+    summary="Retrieve ticket for a confirmed booking",
+    description="Returns the full ticket details for a CONFIRMED booking owned by the authenticated user.",
+)
+def get_booking_ticket(
+    booking_id: int = Path(gt=0),
+    current_user: AuthenticatedUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    booking = db.scalar(
+        select(Booking).where(Booking.id == booking_id, Booking.user_id == current_user.id)
+    )
+    if booking is None:
+        raise HTTPException(status_code=404, detail="Booking not found")
+    if booking.status != "CONFIRMED":
+        raise HTTPException(status_code=409, detail="Ticket is only available for confirmed bookings")
+
+    ticket = db.scalar(select(Ticket).where(Ticket.booking_id == booking.id))
+    if ticket is None:
+        raise HTTPException(status_code=404, detail="Ticket record not found for this booking")
+
+    payment = db.scalar(
+        select(Payment)
+        .where(Payment.booking_id == booking.id)
+        .order_by(Payment.created_at.desc())
+        .limit(1)
+    )
+    if payment is None:
+        raise HTTPException(status_code=500, detail="Payment record missing")
+
+    return _build_cash_ticket(db, booking, ticket, payment)

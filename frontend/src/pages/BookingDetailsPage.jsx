@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import { apiRequest } from '../lib/api';
 import { useAuth } from '../context/AuthContext';
 
@@ -24,11 +24,14 @@ function loadCheckoutScript() {
 export function BookingDetailsPage() {
   const { bookingId } = useParams();
   const { session } = useAuth();
+  const navigate = useNavigate();
   const [booking, setBooking] = useState(null);
   const [error, setError] = useState('');
   const [paymentError, setPaymentError] = useState('');
   const [paying, setPaying] = useState(false);
+  const [cashBusy, setCashBusy] = useState(false);
   const paymentRequestKey = useRef(null);
+  const cashIdempotencyKey = useRef(null);
 
   useEffect(() => {
     let active = true;
@@ -39,7 +42,7 @@ export function BookingDetailsPage() {
   }, [bookingId, session?.access_token]);
 
   async function payForBooking() {
-    if (!booking || !session?.access_token || paying) return;
+    if (!booking || !session?.access_token || paying || cashBusy) return;
     setPaying(true); setPaymentError('');
     paymentRequestKey.current ||= crypto.randomUUID();
     try {
@@ -89,24 +92,95 @@ export function BookingDetailsPage() {
     }
   }
 
-  if (error) return <main className="page-container show-page"><div className="shows-error"><h1>Could not load booking</h1><p>{error}</p><Link className="button button--primary" to="/profile">Go to your profile</Link></div></main>;
+  async function payWithCash() {
+    if (!booking || !session?.access_token || paying || cashBusy) return;
+    setCashBusy(true); setPaymentError('');
+    cashIdempotencyKey.current ||= crypto.randomUUID();
+    try {
+      // POST to cash-confirmation; on success navigate to the ticket page
+      await apiRequest(`/bookings/${booking.id}/cash-confirmation`, session.access_token, {
+        method: 'POST',
+        body: JSON.stringify({ idempotency_key: cashIdempotencyKey.current }),
+      });
+      navigate(`/ticket/${booking.id}`);
+    } catch (reason) {
+      setPaymentError(reason.message);
+      cashIdempotencyKey.current = null;
+    } finally {
+      setCashBusy(false);
+    }
+  }
+
+  if (error) return (
+    <main className="page-container show-page">
+      <div className="shows-error">
+        <h1>Could not load booking</h1>
+        <p>{error}</p>
+        <Link className="button button--primary" to="/profile">Go to your profile</Link>
+      </div>
+    </main>
+  );
   if (!booking) return <main className="page-container show-page" role="status">Loading booking…</main>;
 
-  return <main className="page-container show-page">
-    <span className="eyebrow eyebrow--red">{booking.status === 'CONFIRMED' ? 'Booking confirmed' : 'Booking created'}</span>
-    <h1 className="booking-title">{booking.status === 'CONFIRMED' ? 'Your tickets are confirmed' : 'Your seats are on hold'}</h1>
-    <section className="show-detail-card booking-detail-card">
-      {booking.status === 'PENDING' ? <p>Your seats are reserved until {booking.expires_at ? new Date(booking.expires_at).toLocaleString('en-IN') : 'the hold expires'}.</p> : null}
-      <dl>
-        <div><dt>Reference</dt><dd>{booking.booking_reference}</dd></div>
-        <div><dt>Status</dt><dd>{booking.status}</dd></div>
-        <div><dt>Seats</dt><dd>{booking.seats.map((seat) => `${seat.row_label}${seat.seat_number}`).join(', ') || '—'}</dd></div>
-        <div><dt>Total</dt><dd>{money.format(Number(booking.total_amount))}</dd></div>
-      </dl>
-      {booking.status === 'PENDING' ? <p>Pay before the hold expires. Unpaid bookings expire and release their seats automatically.</p> : <p>Keep this booking reference for your ticket.</p>}
-      {paymentError ? <p className="booking-summary__error" role="alert">{paymentError}</p> : null}
-      {booking.status === 'PENDING' ? <button type="button" className="button button--primary" disabled={paying} onClick={payForBooking}>{paying ? 'Opening secure checkout…' : 'Pay securely with Razorpay'}</button> : null}
-    </section>
-    <Link className="button button--primary booking-profile-link" to="/profile">View your bookings</Link>
-  </main>;
+  const isBusy = paying || cashBusy;
+
+  return (
+    <main className="page-container show-page">
+      <span className="eyebrow eyebrow--red">
+        {booking.status === 'CONFIRMED' ? 'Booking confirmed' : 'Booking created'}
+      </span>
+      <h1 className="booking-title">
+        {booking.status === 'CONFIRMED' ? 'Your tickets are confirmed' : 'Your seats are on hold'}
+      </h1>
+      <section className="show-detail-card booking-detail-card">
+        {booking.status === 'PENDING' && (
+          <p>Your seats are reserved until {booking.expires_at ? new Date(booking.expires_at).toLocaleString('en-IN') : 'the hold expires'}.</p>
+        )}
+        <dl>
+          <div><dt>Reference</dt><dd>{booking.booking_reference}</dd></div>
+          <div><dt>Status</dt><dd>{booking.status}</dd></div>
+          {booking.payment_method && <div><dt>Payment</dt><dd>{booking.payment_method}</dd></div>}
+          <div><dt>Seats</dt><dd>{booking.seats.map((seat) => `${seat.row_label}${seat.seat_number}`).join(', ') || '—'}</dd></div>
+          <div><dt>Total</dt><dd>{money.format(Number(booking.total_amount))}</dd></div>
+        </dl>
+
+        {booking.status === 'PENDING' && (
+          <p>Choose how you want to pay. Cash bookings are confirmed immediately — pay at the counter before the show.</p>
+        )}
+        {booking.status === 'CONFIRMED' && (
+          <p>Keep this booking reference for your ticket.</p>
+        )}
+
+        {paymentError && <p className="booking-summary__error" role="alert">{paymentError}</p>}
+
+        {booking.status === 'PENDING' && (
+          <div className="booking-payment-buttons">
+            <button
+              type="button"
+              className="button button--primary"
+              disabled={isBusy}
+              onClick={payForBooking}
+            >
+              {paying ? 'Opening secure checkout…' : '💳 Pay securely with Razorpay'}
+            </button>
+            <button
+              type="button"
+              className="button button--cash"
+              disabled={isBusy}
+              onClick={payWithCash}
+            >
+              {cashBusy ? 'Confirming cash booking…' : '💵 Cash (Pay at Counter)'}
+            </button>
+          </div>
+        )}
+
+        {booking.status === 'CONFIRMED' && (
+          <Link className="button button--primary" to={`/ticket/${booking.id}`}>
+            View ticket
+          </Link>
+        )}
+      </section>
+      <Link className="button button--primary booking-profile-link" to="/profile">View your bookings</Link>
+    </main>
+  );
 }

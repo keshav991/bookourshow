@@ -20,6 +20,7 @@ class Booking(Base):
         UniqueConstraint("user_id", "idempotency_key", name="uq_bookings_user_idempotency"),
         CheckConstraint("total_amount >= 0", name="ck_bookings_total_nonnegative"),
         CheckConstraint("status IN ('PENDING', 'CONFIRMED', 'CANCELLED', 'EXPIRED')", name="ck_bookings_status"),
+        CheckConstraint("payment_method IS NULL OR payment_method IN ('RAZORPAY', 'CASH')", name="ck_bookings_payment_method"),
         Index("ix_bookings_user_created", "user_id", "created_at"),
         Index("ix_bookings_show_status", "show_id", "status"),
         Index("ix_bookings_pending_expiry", "status", "expires_at"),
@@ -31,6 +32,7 @@ class Booking(Base):
     booking_reference: Mapped[str] = mapped_column(Text, nullable=False)
     total_amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
     status: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'PENDING'"))
+    payment_method: Mapped[str | None] = mapped_column(Text, nullable=True)
     idempotency_key: Mapped[str | None] = mapped_column(Text, nullable=True)
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
