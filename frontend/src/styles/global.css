@@ -7,6 +7,8 @@
   text-rendering: optimizeLegibility;
   --brand: #e53935;
   --brand-dark: #c62828;
+  --brand-accent: #fb8c00;
+  --brand-accent-dark: #e65100;
   --text: #222;
   --muted: #777;
   --border: #eaeaea;
@@ -30,6 +32,27 @@ img { display: block; max-width: 100%; }
 .button:hover { transform: translateY(-1px); }
 .button--primary { color: #fff; background: var(--brand); }
 .button--primary:hover { background: var(--brand-dark); }
+.button--premium {
+  color: #fff;
+  background: var(--brand);
+  text-transform: uppercase;
+  font-size: 14px;
+  font-weight: 800;
+  letter-spacing: .05em;
+  padding: 0 24px;
+  min-height: 48px;
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgb(229 57 53 / 28%);
+}
+.button--premium:hover {
+  background: var(--brand-dark);
+  transform: translateY(-1px);
+  box-shadow: 0 6px 16px rgb(229 57 53 / 36%);
+}
+.button--premium:active {
+  transform: translateY(0);
+  box-shadow: 0 2px 8px rgb(229 57 53 / 22%);
+}
 .button--light { color: var(--text); background: #fff; }
 .button--light:hover { background: #f2f2f2; }
 .button--outline-light { color: #fff; border-color: rgb(255 255 255 / 55%); background: rgb(255 255 255 / 8%); }

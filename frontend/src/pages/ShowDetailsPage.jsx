@@ -35,6 +35,17 @@ export function ShowDetailsPage() {
   }, [showId, retryKey]);
 
   useEffect(() => {
+    try {
+      const raw = localStorage.getItem('bookourshow:booking-context');
+      if (!raw) return;
+      const ctx = JSON.parse(raw);
+      if (ctx && ctx.showId === showId && Array.isArray(ctx.selectedSeats) && ctx.selectedSeats.length) {
+        setSelectedSeats(ctx.selectedSeats);
+      }
+    } catch { /* ignore malformed storage */ }
+  }, [showId]);
+
+  useEffect(() => {
     let active = true;
     setSeatLoading(true); setSeatError('');
     apiRequest(`/shows/${showId}/seats`).then((data) => { if (active) setSeatMap(data); })
@@ -87,7 +98,12 @@ export function ShowDetailsPage() {
   }
 
   async function continueBooking() {
-    if (!user) { navigate('/login', { state: { from: location } }); return; }
+    if (!user) {
+      const ctx = { showId, selectedSeats };
+      localStorage.setItem('bookourshow:booking-context', JSON.stringify(ctx));
+      navigate('/login', { state: { from: location } });
+      return;
+    }
     if (!selectedSeats.length || !session?.access_token) return;
     setBookingBusy(true); setBookingError('');
     let locked = false;
@@ -100,6 +116,7 @@ export function ShowDetailsPage() {
         method: 'POST', body: JSON.stringify({ show_seat_ids: selectedSeats, idempotency_key: bookingAttemptKey.current ||= crypto.randomUUID() }),
       });
       navigate(`/booking/${booking.id}`, { state: { booking } });
+      localStorage.removeItem('bookourshow:booking-context');
     } catch (reason) {
       if (locked) {
         try { await apiRequest(`/shows/${showId}/seats/release`, session.access_token, { method: 'POST', body: JSON.stringify({ show_seat_ids: selectedSeats }) }); }

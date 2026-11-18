@@ -1,11 +1,12 @@
 import { useState } from 'react';
-import { Link, Navigate } from 'react-router-dom';
+import { Link, Navigate, useNavigate } from 'react-router-dom';
 import { AuthFrame, AuthMessage } from '../components/AuthFrame';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
 
 export function RegisterPage() {
   const { user, configured, configError } = useAuth();
+  const navigate = useNavigate();
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -27,7 +28,14 @@ export function RegisterPage() {
       });
       if (error) setMessage(error.message);
       else if (!data.session) setSuccess(true);
-      else window.location.assign('/');
+      else {
+        let returnTo = '/';
+        try {
+          const ctx = JSON.parse(localStorage.getItem('bookourshow:booking-context') || 'null');
+          if (ctx && ctx.showId) returnTo = `/show/${ctx.showId}`;
+        } catch { /* ignore malformed storage */ }
+        navigate(returnTo);
+      }
     } catch (error) { setMessage(error.message || 'Could not create your account. Check your connection and try again.'); }
     finally { setBusy(false); }
   }

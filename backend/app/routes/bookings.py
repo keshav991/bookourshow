@@ -350,7 +350,14 @@ def create_payment_order(
     except (httpx.HTTPError, ValueError) as exc:
         payment.status = "FAILED"
         _commit(db)
-        raise HTTPException(status_code=502, detail="Razorpay could not create a payment order") from exc
+        detail = "Razorpay could not create a payment order"
+        if isinstance(exc, httpx.HTTPStatusError):
+            try:
+                razor_error = exc.response.json().get("error", {})
+                detail = f"{detail} ({razor_error.get('code', 'unknown')}: {razor_error.get('description', 'no description')})"
+            except Exception:
+                pass
+        raise HTTPException(status_code=502, detail=detail) from exc
     payment.provider_order_id = order_id
     _commit(db, "Razorpay order was created but could not be attached to this payment attempt")
     db.refresh(payment)

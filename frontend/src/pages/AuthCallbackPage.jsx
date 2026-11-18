@@ -12,7 +12,14 @@ export function AuthCallbackPage() {
     supabase.auth.getSession().then(({ data, error: authError }) => {
       if (!active) return;
       if (authError) setError(authError.message);
-      else if (data.session) navigate('/', { replace: true });
+      else if (data.session) {
+        let returnTo = '/';
+        try {
+          const ctx = JSON.parse(localStorage.getItem('bookourshow:booking-context') || 'null');
+          if (ctx && ctx.showId) returnTo = `/show/${ctx.showId}`;
+        } catch { /* ignore malformed storage */ }
+        navigate(returnTo, { replace: true });
+      }
       else setError('No active session was found. The sign-in link may have expired.');
     }).catch((reason) => { if (active) setError(reason.message); });
     return () => { active = false; };

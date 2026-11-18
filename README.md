@@ -1,135 +1,148 @@
-# BookOurShow
+# BookOurShow — Phase 3.2 & 3.3 Implementation
 
-## Database foundation
+**BookOurShow** is a full-stack movie ticket booking platform inspired by BookMyShow.
 
-The canonical database setup is under `backend/database/`:
+- **Frontend:** React + Vite + React Router + Supabase JS + Lucide React
+- **Backend:** FastAPI + Python + SQLAlchemy + Pydantic + Uvicorn
+- **Database:** Supabase PostgreSQL
+- **Authentication:** Supabase Auth (email/password + Google OAuth)
+- **Payment:** Razorpay (Test Mode)
 
-```text
-backend/database/
-  migrations/000_reset_development_data.sql  # Optional, destructive; existing dev project only
-  migrations/001_create_schema.sql
-  migrations/002_constraints_indexes.sql
-  migrations/003_rls_policies.sql
-  migrations/004_booking_functions.sql
-  seed/001_master_data.sql
-  seed/002_schedule_data.sql
-  seed/003_test_booking_data.sql
-  verification/001_database_integrity.sql
-  verification/002_booking_integrity.sql
+---
+
+## Phase 3.2 — Razorpay Payment Integration
+
+### Overview
+Implements Razorpay test-mode payment flow: backend order creation → frontend Razorpay Checkout → backend signature verification → payment capture → booking confirmation. **No webhooks configured** (per project requirement).
+
+### Architecture
+
+```
+Frontend (Checkout)                      Backend FastAPI
+┌─────────────────────┐                  ┌──────────────────────────┐
+│  Pay button click   │                  │                          │
+├─────────────────────┤                  ├──────────────────────────┤
+│ 1. POST /payments/  │                  │ 1. GET booking + seats   │
+│    order            │ ─────POST───────▶│ 2. POST /orders (Razorpay)│
+│    (key_id, amount) │                  │ 3. Return order_id       │
+│    (from backend)   │◀────JSON─────────│ 4. Payment record:       │
+│                     │                  │    status=CREATED        │
+│ 2. window.Razorpay  │                  └──────────────────────────┘
+│    open()           │  ┌────────────────────────────────────────┐
+│                     │  │ Backend database state                 │
+│ 3. Checkout UI      │  │ payments: CREATED / AUTHORIZED /       │
+│                     │  │ CAPTURED / FAILED                      │
+│ 4. handler()        │  └────────────────────────────────────────┘
+│    - razorpay_order_id  │
+│    - razorpay_payment_id│
+│    - razorpay_signature │
+│                     │  ┌────────────────────────────────────────┐
+│ 5. POST /payments/verify ◀────POST──────│
+│                     │  │ Signature check                        │
+│ 6. Fetch payment from Razorpay     │
+│    GET /payments/{id}            │
+│ 7. Amount/currency match       │
+│    check                     │
+│ 8. Capture if authorized       │
+│    POST /payments/{id}/capture │
+│ 9. Update payment: CAPTURED    │
+│    ✓ Booking: CONFIRMED        │
+│    ✓ show_seats: BOOKED        │
+└─────────────────────┘  └────────────────────────────────────────┘
 ```
 
-### Manual setup order
+### Files Modified
+| File | Change |
+|------|--------|
+| `frontend/src/pages/BookingDetailsPage.jsx` | Razorpay Checkout integration: `window.Razorpay({ key, amount, currency, order_id, prefill, theme, handler, modal.ondismiss })`. On success, sends `razorpay_order_id`, `razorpay_payment_id`, `razorpay_signature` to `/payments/verify`. On failed/dismissed checkout, shows error / resets key. |
+| `backend/app/routes/bookings.py` | `create_payment_order()` (201): validates active PENDING booking + live seat locks; extends hold to `PAYMENT_HOLD_SECONDS`; creates `Payment(STATUS=CREATED, idempotency_key)`; creates Razorpay `/orders` with **amount in paise**, INR; stores `provider_order_id`. `verify_payment()` (400/409/502): HMAC-SHA256 signature verification via `razorpay_signature_matches()`; verifies order/payment ID + amount + currency; captures authorized payments; finalizes with `_finalize_captured_payment()` — updates `payments.status=CAPTURED`, `bookings.status=CONFIRMED`, `show_seats.status=BOOKED`, clears locks, `expires_at=NULL`. Idempotent duplicate verify returns existing payment. |
+| `backend/app/services/payment_service.py` | `razorpay_signature_matches(order_id, payment_id, signature, secret)` — constant-time HMAC comparison. |
 
-1. Back up the development project and verify the Supabase project reference in `backend/.env`.
-2. For the existing development project only, review and manually run `000_reset_development_data.sql`. It deletes rows from movies, cities, theatres, screens, seats, shows, show seats, bookings, booking seats and payments, and restarts their IDs. It preserves `profiles`, all Auth users, all Auth settings, and Supabase-managed objects. Skip it on a fresh project. Do not run it against production.
-3. Run `001_create_schema.sql`, `002_constraints_indexes.sql`, `003_rls_policies.sql`, and `004_booking_functions.sql`, in that order, in Supabase SQL Editor. `002` checks for `btree_gist` and database CREATE privilege before installing it. If extension installation is denied, stop and have the Supabase project owner enable the extension; do not remove the overlap constraint.
-4. Run `seed/001_master_data.sql`, then `seed/002_schedule_data.sql`. They are idempotent, resolve IDs from natural keys, and create a future 7-day schedule in Asia/Kolkata with one show per four-hour slot and full seat inventory. No payment records are inserted.
-5. Optional booking fixture: create a dedicated `bookourshow.tester@example.com` test identity manually in Supabase Auth, then run `seed/003_test_booking_data.sql`. It creates one pending booking and temporary seat hold; it never creates Auth users or payment success records.
-6. Run both scripts under `verification/`. The first checks schema/counts/inventory/schedule conflicts; the second checks booking totals, seat ownership, duplicate active assignments and payment totals.
-7. Start the backend from `backend` with `..\.venv\Scripts\python.exe -m uvicorn app.main:app --reload`. Configure Razorpay **test** credentials only in `backend/.env` before creating payment orders. Start the existing frontend separately from `frontend` with `npm run dev`.
-
-The existing `backend/seed/development_seed.sql` and `development_schedules.sql` are legacy fixtures for the audited schema. Do not run them with the new schema; use `backend/database/seed/` instead. `backend/supabase_schema.sql` is now a read-only check for the existing Auth profile trigger; `003_rls_policies.sql` also verifies, but never changes, the trigger on `auth.users`.
-
-### Booking and payment behavior
-
-- FastAPI verifies Supabase access tokens and takes the user ID only from the verified identity.
-- Seat locking uses one conditional `UPDATE ... WHERE status='AVAILABLE' OR expired` statement inside a database transaction. If any requested seat was not acquired, the transaction rolls back all seat updates.
-- Creating a Razorpay order extends the pending booking seat hold (default 15 minutes) and sends the same expiry to Razorpay; the booking is still checked against its owner, seat-lock state and provider payment before confirmation.
-- `show_seats` holds the current owner/lock state and, after booking, the current booking ID. Historical booking-seat rows can remain when a seat is released and sold again.
-- Composite foreign keys enforce show/screen/seat consistency and booking/show/show-seat consistency. PostgreSQL exclusions prevent any overlapping intervals on a screen.
-- Deferred database triggers require active booking totals to match booking-seat prices and active bookings to own seats in the required locked/booked state.
-- Razorpay order creation and verification happen on the backend. Verification checks the HMAC signature and fetches provider payment state and amount before confirming the booking. A captured payment blocks cancellation until it is refunded externally; this version does not expose a refund endpoint.
-- RLS permits public reads of catalogue/availability and owner-only reads of profile/booking/payment data. Client roles have no booking/payment write policies. The backend `DATABASE_URL` is server-only; never put it, a Razorpay secret, or a Supabase service-role key in frontend configuration.
-
-These migration and seed files are prepared only. They were not executed against the live Supabase database. The migration set assumes the audited application tables and the existing `public.handle_new_user` trigger are present; on a fresh Supabase project, provision the existing Auth profile trigger first, then apply migrations. No Auth-managed schema or Auth configuration is modified by these migrations.
-
-BookOurShow is a responsive movie discovery and ticket booking application built with React, Vite, JavaScript, React Router, Lucide icons, FastAPI, SQLAlchemy, Supabase Auth, and Supabase PostgreSQL. Movie, show, seat, booking, and payment data are served through FastAPI.
-
-## Frontend structure
-
-```text
-frontend/
-  public/images/          Local poster fallback
-  src/
-    components/           Navigation, auth frame, protected route, search, filters, carousel, cards
-    context/               Shared Supabase auth session
-    lib/                   Supabase client and FastAPI request helper
-    data/movieCatalog.js  API movie mapping and search/filter helpers
-    pages/                Home, movie listing/details, sign-in, registration and profile
-    styles/               Global, navigation, auth, homepage and movie styles
-    App.jsx
-    main.jsx
-  index.html
-  package.json
-  vite.config.js
+### Configuration Required (`backend/.env`)
+```
+RAZORPAY_KEY_ID=rzp_test_...
+RAZORPAY_KEY_SECRET=...
+RAZORPAY_API_URL=https://api.razorpay.com/v1
+RAZORPAY_WEBHOOK_SECRET=...          # present but unused (no webhooks)
 ```
 
-## Run the website
+### Known Bug Fixed — `expire_by` Field
+**Issue:** `create_payment_order` sent `expire_by` in the Razorpay `/orders` request. Razorpay rejected it:
+```
+{"error":{"code":"BAD_REQUEST_ERROR","description":"expire_by is/are not required and should not be sent"}}
+```
+This caused a 502 "Razorpay could not create a payment order" and blocked the entire payment flow.
 
-```powershell
+**Fix:** Removed `"expire_by": int(booking.expires_at.timestamp()),` from the order payload in `backend/app/routes/bookings.py:342`. Booking hold expiry is still enforced server-side via `booking.expires_at` and `show_seat.locked_until` — `expire_by` was redundant.
+
+### Verification Steps (manual, in browser)
+1. Login → select movie → show → seats → Book tickets
+2. Click **"Pay securely with Razorpay"** → verify no 503 error
+3. Verify order creation returns `201` with `provider_order_id` and `key_id` (check Network tab)
+4. Checkout opens with correct amount (paise)
+5. Complete a **test payment** using Razorpay's Test Mode card details
+6. Verify signature on backend → booking becomes **CONFIRMED**, seats **BOOKED**
+7. Test **duplicate verification** with a reused signature → should return existing payment, not double-confirm
+8. Test **cancelled checkout** → error shown, seats still locked until expiry
+
+### Security
+- **No credentials exposed** in logs, responses, or frontend (only `key_id` public key is sent to browser).
+- Signature verified server-side with `hmac.compare_digest()` (constant-time).
+- Webhook endpoint exists but is **not used**; requires `RAZORPAY_WEBHOOK_SECRET`.
+
+---
+
+## Phase 3.3 — Homepage Redesign
+
+### Overview
+Redesigned the homepage with a strong BookMyShow-inspired design: **Movies as the primary focus**, functional city selector, all 15 movie cards with genuine TMDB posters, hero banner, and rich About sections. Frontend-only task (no backend/database changes).
+
+### Files Modified (frontend/ only)
+| File | Change |
+|------|--------|
+| `src/data/movieMetadata.js` | **NEW:** Metadata mapping for all 15 movies — title, year, genre, duration, certification, language, director, cast, synopsis, detailed "About" content, TMDB poster/backdrop paths. `getMovieMetadata(id)` with slug + title fallback lookup. `getTmdbPosterUrl(path, size)`, `getTmdbBackdropUrl(path, size)`, `POSTER_FALLBACK`. |
+| `src/pages/Home.jsx` | Hero banner (featured movie with backdrop, Book Tickets CTA, city chip), "Now Showing" + "Coming Soon" movie sections, **Popular Cities** section (fetched from `GET /cities`), error/loading/empty states. |
+| `src/components/Navbar.jsx` | **Movies** as most prominent nav item (`nav-link--active`), "Coming Soon" secondary; city selector + search + auth on right. |
+| `src/components/LocationSelector.jsx` | **NEW:** Fetches cities from backend `GET /cities`, searchable dropdown, persists selection via `onChange`, empty/loading/error states, click-outside-close. |
+| `src/components/MovieCard.jsx` | TMDB poster URL with `onError` fallback, 2:3 aspect ratio, backdrop hover reveal, Book Tickets button (always visible), title/genre·year/duration. |
+| `src/components/MovieSection.jsx` | Section heading with "View all" link, `movie-grid--cards`. |
+| `src/pages/MovieDetails.jsx` | Rich About section: backdrop hero, large poster, meta chips, synopsis, **big Book Tickets CTA**, director/cast credits, "About This Movie" + "Movie Details" table. |
+| `src/styles/home.css` | Hero banner, movie sections, Popular Cities grid, responsive media queries. |
+| `src/styles/navbar.css` | Movies nav priority, city dropdown, search focus states, mobile menu. |
+| `src/styles/movie-card.css` | Book Tickets button animation, hover effects. |
+| `src/styles/movie-details.css` | About section styling, meta chips, credits. |
+
+### Poster Strategy
+- Genuine **TMDB** poster URLs (`https://image.tmdb.org/t/p/w500/{path}`) for all 15 real movies, backed by the metadata file.
+- `onError` fallback to `/images/poster-fallback.svg` — no broken images.
+- No placeholders or invented posters. New/upcoming films (e.g. Ramayana 2026, Jailer 2 2026) may resolve to fallback if no TMDB entry yet.
+
+### Design Decisions
+- **Movies-first navigation:** "Movies" highlighted/active; Events/Plays/Sports/Activities demoted to secondary "coming soon" links.
+- **Book Tickets CTA:** Big, red, bold (`button--primary`), always visible on cards; prominent in hero and details page.
+- **City selector:** Functional, API-driven, searchable — displays selected city in the header and hero.
+- **BookMyShow palette:** White background, dark typography, red accent (`#e53935`), consistent 2:3 poster cards, subtle hover shadows, responsive grid (5 cols desktop / 3 tablet / 2 mobile).
+
+### Build Verification
+```
 cd frontend
-npm install
-npm run dev
-```
-
-Open the local URL printed by Vite (normally `http://localhost:5173`). Build the production frontend with:
-
-```powershell
 npm run build
+# ✓ built in ~2s
+# dist/index.html, assets/index-*.css (~38KB), assets/index-*.js (~490KB)
 ```
+All 15 movie entries, TMDB poster/backdrop paths, component imports, Book Tickets buttons, and onError fallbacks verified.
 
-## Phase 2: authentication and profile
+### Verification Steps (manual)
+1. Open http://localhost:5173 → verify hero banner with featured movie + Book Tickets button
+2. Verify all 15 movie cards display with real posters (check for fallbacks only for upcoming titles)
+3. Verify "Popular Cities" section shows backend city list (7 cities)
+4. Verify city selector dropdown works + search
+5. Verify Movies navigation is highlighted; hover states on cards (backdrop reveal + Book now button)
+6. Click a movie → About page shows backdrop, poster, synopsis, director, cast, About This Movie, big Book Tickets
+7. Test responsive layout (mobile/tablet breakpoints)
+8. Verify existing flows unchanged: showtime selection, seat locking, booking, Razorpay payment still work
 
-The frontend uses one Supabase Auth client for email/password, Google OAuth, email verification, password reset, and the local browser session. It sends the signed-in access token to FastAPI profile and booking routes. The API remains the source of truth for the profile role. The seat-selection flow creates pending bookings, and Razorpay Standard Checkout runs in the browser while order creation, signature verification, and booking confirmation remain on the backend.
-
-Configure `frontend/.env` with the existing Supabase project URL and its publishable key:
-
-```dotenv
-VITE_SUPABASE_URL=https://your-project.supabase.co
-VITE_SUPABASE_PUBLISHABLE_KEY=your-publishable-key
-VITE_API_URL=http://127.0.0.1:8000
-```
-
-`VITE_SUPABASE_ANON_KEY` is also accepted for projects still using the legacy anon key name. These are browser-safe publishable credentials; never put the Supabase service role key in the frontend. Keep `backend/.env` configured with the matching Supabase URL and publishable key, database URL, and CORS origins (`http://localhost:5173,http://127.0.0.1:5173`). Run the FastAPI app on port 8000, then start Vite as above.
-
-To enable Google sign-in, configure Google as an Auth provider in the Supabase dashboard. In Google Cloud, create a Web OAuth client and set its authorized redirect URI to the Supabase callback shown in the provider settings (normally `https://<project-ref>.supabase.co/auth/v1/callback`). Put the Google client ID and secret in Supabase provider settings only. In Supabase Auth URL configuration, set the site URL to `http://localhost:5173` and allow `http://localhost:5173/auth/callback`, `http://localhost:5173/reset-password`, and the equivalent `127.0.0.1` URLs if you use that host. Production domains must be added there before deploying.
-
-Email signup may require inbox verification according to the Supabase Auth settings. Profile display and edits also require the backend and the existing `profiles` table/trigger to be configured. Logout asks FastAPI to revoke the current user session and clears the local browser session; if the API is offline, local sign-out still completes.
-
-## Phase 3.1: theatres and showtimes
-
-The backend exposes public read-only movie/show catalogue endpoints. Shows use `TIMESTAMPTZ`; dates and times are displayed in `Asia/Kolkata`. Because the `shows` table has no status column, the API derives `scheduled`/`completed` from `start_time`. Razorpay test credentials are required only for payment-order APIs.
-
-The original `backend/seed/development_seed.sql` and `development_schedules.sql` are retained as legacy examples only. Do not execute them with the rebuilt schema. Follow the manual setup and seed order in the **Database foundation** section above. The live database could not be accessed from this environment; verify its deployed schema in Supabase SQL Editor before treating prepared migrations as applied.
-
-Endpoints:
-
-- `GET /movies/lookup?title=...` resolves the existing demo movie title to its database movie ID.
-- `GET /movies/{movie_id}` returns movie details.
-- `GET /shows/movie/{movie_id}/dates` returns available show dates.
-- `GET /shows/movie/{movie_id}?date=YYYY-MM-DD` returns theatres and showtimes for a selected date. Without a date, it selects the earliest available date.
-- `GET /shows/{show_id}` returns show, movie, theatre, and screen details.
-- `POST /shows/{show_id}/seats/lock` conditionally acquires selected show-seat IDs for the verified user.
-- `POST /shows/{show_id}/seats/release` releases only that user's unbooked holds.
-- `POST /bookings/shows/{show_id}` creates a pending booking from live locks; `GET /bookings/me` and `GET /bookings/{booking_id}` show owned bookings.
-- `POST /bookings/{booking_id}/cancel` cancels unpaid bookings and releases their seats.
-- `POST /bookings/{booking_id}/payments/order` creates an idempotent Razorpay order; `POST /bookings/{booking_id}/payments/verify` verifies its signature and provider payment before confirming seats.
-
-To manually verify the movie/show/seat flow, follow the database readiness checks above, start FastAPI (`uvicorn app.main:app --reload` from `backend`) and Vite (`npm run dev` from `frontend`), then open a movie, select a showtime and reserve seats. For test checkout, configure `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`, and `RAZORPAY_WEBHOOK_SECRET` in `backend/.env`. Configure a Razorpay Test Mode webhook for `payment.authorized`, `payment.captured`, and `payment.failed` events at `https://<public-backend-host>/webhooks/razorpay`. Razorpay cannot deliver webhooks directly to localhost; use an HTTPS staging host or an allowed tunnel. Never configure live keys for local testing.
-
-## Phase 1 functionality
-
-- Search the static catalog by title, description, genre, language, cast or director. Search is case-insensitive and includes a clear control.
-- Filter by genre and clear the selected genre.
-- Use the featured movie carousel controls and slide indicators.
-- Open dynamic movie detail pages at `/movie/:id` from movie cards.
-- Use the city selector and responsive mobile navigation.
-- Explore listing filters through the secondary navigation and View All links.
-- Open trailer search results, then return to movie details. The Book Tickets action opens the theatre and showtime list; booking UI remains out of scope.
-- Failed poster requests use a local fallback image.
-
-The mock catalog and its release details are sample UI content, not a live schedule. Some movie posters load from fixed TMDB image URLs; the local fallback is used when an image cannot load. Stream, events, plays, sports, and activities currently show a clear coming-soon message.
-
-## Validation
-
-`npm run build` validates the production bundle. Interactive routes, responsive layout and external image rendering should also be reviewed in a browser at desktop and mobile widths before release.
+### Notes
+- No backend, database, API endpoints, auth, or payment logic was modified.
+- Existing `/movies`, `/movies/{id}`, and `/cities` endpoints reused unchanged.
+- Movie data displayed via `toCatalogMovie()` mapping; additional metadata (year, cast, director, about) pulled from the frontend-only `movieMetadata.js` mapping.

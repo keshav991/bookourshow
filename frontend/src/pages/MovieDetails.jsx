@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, CalendarDays, Clock3, Play } from 'lucide-react';
+import { ArrowLeft, CalendarDays, Clock3, Play, Ticket } from 'lucide-react';
 import { apiRequest } from '../lib/api';
 
 export function MovieDetails() {
@@ -53,7 +53,7 @@ export function MovieDetails() {
               </div>
               <p className="movie-details__language">{movie.language}</p>
               <div className="movie-details__actions">
-                {!isUpcoming && <button className="button button--primary" type="button" onClick={() => navigate(`/movie/${movie.id}/shows`)}>Book tickets</button>}
+                {!isUpcoming && <button className="button button--premium" type="button" onClick={() => navigate(`/movie/${movie.id}/shows`)}><Ticket size={15} fill="currentColor" /> BOOK TICKET</button>}
                 <a className="button button--outline-light" href={trailerSearch} target="_blank" rel="noreferrer"><Play size={16} /> Watch trailer</a>
               </div>
             </div>

@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom';
-import { Star } from 'lucide-react';
+import { Star, Ticket } from 'lucide-react';
 
 const fallbackImage = '/images/poster-fallback.svg';
 
@@ -24,7 +24,7 @@ export function MovieCard({ movie, compact = false }) {
         <h3>{movie.title}</h3>
         {movie.genres?.length ? <p>{movie.genres.slice(0, 2).join(' · ')}</p> : null}
         <span>{movie.status === 'upcoming' ? movie.releaseDate : (movie.language || []).join(', ')}</span>
-        {movie.status === 'now-showing' && <span className="movie-card__action">Book tickets <span aria-hidden="true">→</span></span>}
+        {movie.status === 'now-showing' && <span className="movie-card__action"><Ticket size={9} fill="currentColor" /> BOOK TICKETS <span aria-hidden="true">→</span></span>}
       </div>
     </Link>
   );

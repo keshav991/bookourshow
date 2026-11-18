@@ -9,16 +9,28 @@ export function LoginPage() {
   const location = useLocation();
   const navigate = useNavigate();
   const [email, setEmail] = useState('');
+
+  function getReturnTo() {
+    if (location.state?.from?.pathname) return location.state.from.pathname;
+    try {
+      const ctx = JSON.parse(localStorage.getItem('bookourshow:booking-context') || 'null');
+      if (ctx && ctx.showId) return `/show/${ctx.showId}`;
+    } catch { /* ignore malformed storage */ }
+    return '/';
+  }
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
-  if (user) return <Navigate to={location.state?.from || '/'} replace />;
+  if (user) return <Navigate to={getReturnTo() || '/'} replace />;
 
   async function submit(event) {
     event.preventDefault(); setMessage(''); setBusy(true);
     try {
       const { error } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
-      if (error) setMessage(error.message); else navigate(location.state?.from || '/', { replace: true });
+      if (error) setMessage(error.message); else { 
+        const dest = getReturnTo() || '/';
+        navigate(dest, { replace: true }); 
+      }
     } catch (error) { setMessage(error.message || 'Could not sign in. Check your connection and try again.'); }
     finally { setBusy(false); }
   }
