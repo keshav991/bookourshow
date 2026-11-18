@@ -1,12 +1,15 @@
-import { useState } from 'react';
-import { Link, Navigate, useNavigate } from 'react-router-dom';
+import { useEffect, useState } from 'react';
+import { Link, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { AuthFrame, AuthMessage } from '../components/AuthFrame';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
+import { clearPendingReturnTo, returnToFromLocation, savePendingReturnTo, takePendingReturnTo } from '../lib/authReturnTo';
 
 export function RegisterPage() {
   const { user, configured, configError } = useAuth();
+  const location = useLocation();
   const navigate = useNavigate();
+  const returnTo = returnToFromLocation(location.state?.from);
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -14,13 +17,18 @@ export function RegisterPage() {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
   const [success, setSuccess] = useState(false);
-  if (user) return <Navigate to="/" replace />;
+  useEffect(() => {
+    if (location.state?.from) savePendingReturnTo(returnTo);
+    else clearPendingReturnTo();
+  }, []);
+  if (user) return <Navigate to={returnTo} replace />;
 
   async function submit(event) {
     event.preventDefault(); setMessage('');
     if (password.length < 8) { setMessage('Choose a password with at least 8 characters.'); return; }
     if (password !== confirm) { setMessage('The passwords do not match.'); return; }
     setBusy(true);
+    savePendingReturnTo(returnTo);
     try {
       const { data, error } = await supabase.auth.signUp({
         email: email.trim(), password,
@@ -29,12 +37,7 @@ export function RegisterPage() {
       if (error) setMessage(error.message);
       else if (!data.session) setSuccess(true);
       else {
-        let returnTo = '/';
-        try {
-          const ctx = JSON.parse(localStorage.getItem('bookourshow:booking-context') || 'null');
-          if (ctx && ctx.showId) returnTo = `/show/${ctx.showId}`;
-        } catch { /* ignore malformed storage */ }
-        navigate(returnTo);
+        navigate(takePendingReturnTo() || returnTo, { replace: true });
       }
     } catch (error) { setMessage(error.message || 'Could not create your account. Check your connection and try again.'); }
     finally { setBusy(false); }
@@ -42,8 +45,9 @@ export function RegisterPage() {
   async function google() {
     setBusy(true);
     try {
+      savePendingReturnTo(returnTo);
       const { error } = await supabase.auth.signInWithOAuth({ provider: 'google', options: { redirectTo: `${window.location.origin}/auth/callback` } });
-      if (error) setMessage(error.message);
+      if (error) { clearPendingReturnTo(); setMessage(error.message); }
     } catch (error) { setMessage(error.message || 'Could not start Google sign-in.'); }
     finally { setBusy(false); }
   }
@@ -61,7 +65,7 @@ export function RegisterPage() {
       <label>Confirm password<input type="password" autoComplete="new-password" required value={confirm} onChange={(e) => setConfirm(e.target.value)} /></label>
       <button className="button button--primary auth-submit" disabled={busy || !configured}>{busy ? 'Creating account…' : 'Create account'}</button>
     </form>
-    <p className="auth-switch">Already have an account? <Link to="/login">Sign in</Link></p>
+    <p className="auth-switch">Already have an account? <Link to="/login" state={{ from: location.state?.from }}>Sign in</Link></p>
   </AuthFrame>;
 }
 

@@ -62,6 +62,21 @@ export function ShowDetailsPage() {
     return () => { active = false; };
   }, [showId, seatRetryKey]);
 
+  useEffect(() => {
+    if (!seatMap?.seats || !selectedSeats.length) return;
+    const availability = new Map(seatMap.seats.map((seat) => [seat.show_seat_id, seat.status]));
+    const unavailable = selectedSeats.filter((seatId) => availability.get(seatId) !== 'AVAILABLE');
+    if (!unavailable.length) return;
+    const remaining = selectedSeats.filter((seatId) => availability.get(seatId) === 'AVAILABLE');
+    setSelectedSeats(remaining);
+    setBookingError('Some selected seats are no longer available. Please choose available seats again.');
+    sessionStorage.removeItem('bookourshow:age-confirmation');
+    try {
+      if (remaining.length) localStorage.setItem('bookourshow:booking-context', JSON.stringify({ showId, selectedSeats: remaining }));
+      else localStorage.removeItem('bookourshow:booking-context');
+    } catch { /* The current page still reflects the available seats. */ }
+  }, [seatMap, selectedSeats, showId]);
+
   const backTo = location.state?.returnTo || (show ? `/movie/${show.movie.id}/shows?date=${show.show_date}` : '/movies');
   if (loading) return <main className="page-container show-page"><ShowDetailSkeleton /></main>;
   if (error) return <main className="page-container show-page"><div className="shows-error"><h1>Could not load show details</h1><p>{error}</p><button className="button button--primary" onClick={() => setRetryKey((key) => key + 1)}>Try again</button></div></main>;
