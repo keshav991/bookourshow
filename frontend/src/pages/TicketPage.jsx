@@ -41,6 +41,7 @@ export function TicketPage() {
   const [ticket, setTicket] = useState(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
+  const [cancelling, setCancelling] = useState(false);
   const printRef = useRef(null);
 
   const verifyUrl = ticket
@@ -60,6 +61,18 @@ export function TicketPage() {
 
   function handlePrint() {
     window.print();
+  }
+
+  async function cancelTicket() {
+    if (!ticket || cancelling) return;
+    if (!window.confirm('Cancel this ticket? It will no longer pass QR verification. Any counter refund must be handled by theatre staff.')) return;
+    setCancelling(true);
+    try {
+      await apiRequest(`/bookings/${bookingId}/cancel`, session.access_token, { method: 'POST' });
+      navigate(`/booking/${bookingId}`, { replace: true });
+    } catch (reason) {
+      setError(reason.message);
+    } finally { setCancelling(false); }
   }
 
   if (loading) {
@@ -95,6 +108,11 @@ export function TicketPage() {
           🖨 Print / Save ticket
         </button>
         <Link className="button button--quiet" to="/profile">My bookings</Link>
+        {ticket.status === 'CONFIRMED' && ticket.payment_method === 'CASH' && (
+          <button className="button button--quiet" type="button" disabled={cancelling} onClick={cancelTicket}>
+            {cancelling ? 'Cancelling…' : 'Cancel ticket'}
+          </button>
+        )}
       </div>
 
       <div className="ticket-card" ref={printRef}>
@@ -161,7 +179,7 @@ export function TicketPage() {
               {ticket.payment_method === 'CASH' ? '💵 CASH' : '💳 ' + ticket.payment_method}
             </div>
             <div className={`ticket-payment-status ${ticket.payment_method === 'CASH' ? 'ticket-payment-status--pending' : 'ticket-payment-status--paid'}`}>
-              {ticket.payment_method === 'CASH' ? 'PENDING PAYMENT' : ticket.payment_status}
+              {ticket.payment_status}
             </div>
             <TicketBadge status={ticket.status} />
           </div>

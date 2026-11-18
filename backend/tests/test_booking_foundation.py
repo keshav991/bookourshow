@@ -275,6 +275,7 @@ class TestSeatLockApi(unittest.TestCase):
             db.commit()
         return booking
 
+
     def _send_webhook(self, payload, secret="test-webhook-secret"):
         raw = json.dumps(payload, separators=(",", ":")).encode()
         signature = hmac.new(secret.encode(), raw, hashlib.sha256).hexdigest()

@@ -34,14 +34,15 @@ export function TicketVerifyPage() {
     <main className="page-container show-page ticket-verify-page">
       <div className={`ticket-verify-card ${isValid ? 'ticket-verify-card--valid' : 'ticket-verify-card--invalid'}`}>
         <div className="ticket-verify-icon">{isValid ? '✅' : '⚠️'}</div>
-        <h1 className="ticket-verify-title">{isValid ? 'Valid Ticket' : 'Ticket Not Confirmed'}</h1>
+        <h1 className="ticket-verify-title">{isValid ? 'Valid Ticket' : result?.booking_status === 'CANCELLED' ? 'Ticket Cancelled' : 'Ticket Not Confirmed'}</h1>
         <p className="ticket-verify-ref">{result.booking_reference}</p>
 
         <div className="ticket-details" style={{ marginTop: '1.5rem' }}>
           <div className="ticket-row"><span className="ticket-row__label">Movie</span><span className="ticket-row__value">{result.movie_title}</span></div>
           <div className="ticket-row"><span className="ticket-row__label">Theatre</span><span className="ticket-row__value">{result.theatre_name}</span></div>
+          <div className="ticket-row"><span className="ticket-row__label">Screen</span><span className="ticket-row__value">{result.screen_name}</span></div>
           <div className="ticket-row"><span className="ticket-row__label">Date</span><span className="ticket-row__value">{result.show_date}</span></div>
-          <div className="ticket-row"><span className="ticket-row__label">Time</span><span className="ticket-row__value">{result.show_start_time}</span></div>
+          <div className="ticket-row"><span className="ticket-row__label">Time</span><span className="ticket-row__value">{result.show_start_time} – {result.show_end_time}</span></div>
           <div className="ticket-row"><span className="ticket-row__label">Seats</span><span className="ticket-row__value">{result.seat_labels}</span></div>
           <div className="ticket-row"><span className="ticket-row__label">Booking status</span><span className="ticket-row__value">{result.booking_status}</span></div>
           <div className="ticket-row"><span className="ticket-row__label">Payment method</span><span className="ticket-row__value">{result.payment_method || '—'}</span></div>

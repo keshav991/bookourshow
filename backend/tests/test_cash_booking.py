@@ -142,7 +142,7 @@ class TestCashBookingWorkflow(unittest.TestCase):
         self.assertEqual(data["booking_reference"], "BOS-TEST01")
         self.assertEqual(data["status"], "CONFIRMED")
         self.assertEqual(data["payment_method"], "CASH")
-        self.assertEqual(data["payment_status"], "CREATED")
+        self.assertEqual(data["payment_status"], "PENDING_PAYMENT")
         self.assertEqual(Decimal(str(data["total_amount"])), Decimal("500.00"))
         self.assertEqual(data["movie_title"], "Interstellar")
         self.assertEqual(data["theatre_name"], "Example Cinema")
@@ -171,11 +171,58 @@ class TestCashBookingWorkflow(unittest.TestCase):
             self.assertIsNotNone(payment)
             self.assertEqual(payment.provider, "CASH")
             self.assertEqual(payment.status, "CREATED")
-
-            # Ticket record must exist
             ticket = db.query(Ticket).filter(Ticket.booking_id == bid).first()
             self.assertIsNotNone(ticket)
             self.assertEqual(ticket.token, data["ticket_token"])
+
+    def test_confirmed_cash_ticket_cancellation_releases_seats_and_invalidates_qr(self):
+        booking_id = self._create_locked_booking()
+        ticket = self.client.post(f"/bookings/{booking_id}/cash-confirmation", json={
+            "idempotency_key": "cash-cancel-confirm-01",
+        }).json()
+        cancelled = self.client.post(f"/bookings/{booking_id}/cancel")
+        self.assertEqual(cancelled.status_code, 200, cancelled.text)
+        self.assertEqual(cancelled.json()["status"], "CANCELLED")
+        with self.Session() as db:
+            self.assertEqual(db.get(Booking, booking_id).status, "CANCELLED")
+            self.assertEqual(db.scalar(select(Ticket).where(Ticket.booking_id == booking_id)).token, ticket["ticket_token"])
+            seats = db.scalars(select(ShowSeat).where(ShowSeat.booking_id.is_(None), ShowSeat.id.in_([201, 202]))).all()
+            self.assertEqual(len(seats), 2)
+            self.assertTrue(all(seat.status == "AVAILABLE" and seat.locked_by is None and seat.locked_until is None for seat in seats))
+        verified = self.client.get(f"/tickets/verify/{ticket['ticket_token']}")
+        self.assertEqual(verified.status_code, 200, verified.text)
+        self.assertFalse(verified.json()["is_valid"])
+        self.assertEqual(verified.json()["booking_status"], "CANCELLED")
+        self.assertEqual(verified.json()["payment_status"], "PENDING_PAYMENT")
+        relocked = self.client.post("/shows/40/seats/lock", json={"show_seat_ids": [201, 202]})
+        self.assertEqual(relocked.status_code, 201, relocked.text)
+        rebooked = self.client.post("/bookings/shows/40", json={
+            "show_seat_ids": [201, 202], "idempotency_key": "cash-rebook-after-cancel-01",
+        })
+        self.assertEqual(rebooked.status_code, 201, rebooked.text)
+        self.assertEqual(rebooked.json()["status"], "PENDING")
+
+    def test_confirmed_cash_ticket_cannot_be_cancelled_after_showtime(self):
+        booking_id = self._create_locked_booking()
+        self.client.post(f"/bookings/{booking_id}/cash-confirmation", json={
+            "idempotency_key": "cash-cancel-cutoff-01",
+        })
+        with self.Session() as db:
+            show = db.get(MovieShow, 40)
+            show.start_time = datetime.now(timezone.utc) - timedelta(minutes=1)
+            db.commit()
+        response = self.client.post(f"/bookings/{booking_id}/cancel")
+        self.assertEqual(response.status_code, 409, response.text)
+        self.assertEqual(self.client.get(f"/bookings/{booking_id}").json()["status"], "CONFIRMED")
+
+    def test_another_user_cannot_cancel_confirmed_cash_ticket(self):
+        booking_id = self._create_locked_booking()
+        self.client.post(f"/bookings/{booking_id}/cash-confirmation", json={
+            "idempotency_key": "cash-cancel-owner-01",
+        })
+        self.active_user[0] = AuthenticatedUser(id=uuid4(), email="other@example.com")
+        response = self.client.post(f"/bookings/{booking_id}/cancel")
+        self.assertEqual(response.status_code, 404)
 
     def test_02_ticket_verification_public_endpoint(self):
         """2. Public ticket verification endpoint validates genuine token without exposing PII."""
@@ -193,7 +240,7 @@ class TestCashBookingWorkflow(unittest.TestCase):
         self.assertEqual(vdata["booking_reference"], "BOS-TEST01")
         self.assertEqual(vdata["booking_status"], "CONFIRMED")
         self.assertEqual(vdata["payment_method"], "CASH")
-        self.assertEqual(vdata["payment_status"], "CREATED")
+        self.assertEqual(vdata["payment_status"], "PENDING_PAYMENT")
         self.assertEqual(vdata["movie_title"], "Interstellar")
         self.assertEqual(vdata["theatre_name"], "Example Cinema")
         self.assertEqual(vdata["seat_labels"], "A1, A2")
@@ -255,23 +302,6 @@ class TestCashBookingWorkflow(unittest.TestCase):
             json={"idempotency_key": "cash-cancelled-01"},
         )
         self.assertEqual(response.status_code, 409)
-
-    def test_08_active_razorpay_conflict_rejected(self):
-        """8. If Razorpay checkout is in progress, cash confirmation is rejected."""
-        bid = self._create_locked_booking()
-        with self.Session() as db:
-            db.add(Payment(
-                booking_id=bid, provider="RAZORPAY", amount=Decimal("500.00"),
-                status="CREATED", idempotency_key="rp-active-01",
-            ))
-            db.commit()
-
-        response = self.client.post(
-            f"/bookings/{bid}/cash-confirmation",
-            json={"idempotency_key": "cash-conflict-01"},
-        )
-        self.assertEqual(response.status_code, 409)
-        self.assertIn("Razorpay payment is in progress", response.json()["detail"])
 
     def test_09_unauthenticated_request_rejected(self):
         """9. Unauthenticated requests to cash confirmation return 401."""

@@ -148,7 +148,9 @@ class TicketVerifyResponse(BaseModel):
     payment_status: str     # PENDING_PAYMENT | CAPTURED | etc.
     show_date: str
     show_start_time: str
+    show_end_time: str
     theatre_name: str
+    screen_name: str
     movie_title: str
     seat_labels: str
     is_valid: bool

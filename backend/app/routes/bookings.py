@@ -256,27 +256,28 @@ def cancel_booking(
         raise HTTPException(status_code=404, detail="Booking not found")
     if booking.status in {"CANCELLED", "EXPIRED"}:
         return _booking_response(db, booking)
-    if booking.status == "CONFIRMED" and db.scalar(select(Payment.id).where(
-        Payment.booking_id == booking.id, Payment.status == "CAPTURED"
-    ).limit(1)):
-        raise HTTPException(status_code=409, detail="A captured payment must be refunded by Razorpay before cancellation")
     if booking.status not in {"PENDING", "CONFIRMED"}:
         raise HTTPException(status_code=409, detail="Booking cannot be cancelled in its current state")
-    if booking.status == "PENDING" and db.scalar(select(Payment.id).where(
-        Payment.booking_id == booking.id, Payment.status.in_(["CREATED", "AUTHORIZED"])
-    ).limit(1)):
-        raise HTTPException(status_code=409, detail="A payment attempt is active; wait for its result before cancelling")
-    if booking.status == "PENDING":
-        # Run the booking transition first. PostgreSQL's after-trigger releases its
-        # seats only once the booking is terminal; SQLite fixtures need this fallback.
-        booking.status = "CANCELLED"
-        db.flush()
-        db.execute(update(ShowSeat).where(
-            ShowSeat.booking_id == booking.id,
-            ShowSeat.status == "LOCKED",
-        ).values(status="AVAILABLE", locked_by=None, locked_until=None, booking_id=None))
-    else:
-        booking.status = "CANCELLED"
+    if booking.status == "CONFIRMED" and booking.payment_method != "CASH":
+        raise HTTPException(status_code=409, detail="Only confirmed cash bookings can be cancelled through this workflow")
+
+    show = db.scalar(select(MovieShow).where(MovieShow.id == booking.show_id))
+    now = _database_utc_now(db)
+    cutoff = timedelta(minutes=settings.CANCELLATION_CUTOFF_MINUTES)
+    if show is None or _as_utc(show.start_time) <= now + cutoff:
+        raise HTTPException(status_code=409, detail="This booking can no longer be cancelled because the showtime cutoff has passed")
+
+    # Lock only seats assigned to this booking; the database terminal-state trigger
+    # performs the same release in PostgreSQL. The update is the SQLite fallback.
+    db.scalars(select(ShowSeat).where(
+        ShowSeat.booking_id == booking.id
+    ).order_by(ShowSeat.id).with_for_update()).all()
+    booking.status = "CANCELLED"
+    db.flush()
+    db.execute(update(ShowSeat).where(
+        ShowSeat.booking_id == booking.id,
+        ShowSeat.status.in_(["LOCKED", "BOOKED"]),
+    ).values(status="AVAILABLE", locked_by=None, locked_until=None, booking_id=None))
     _commit(db)
     db.refresh(booking)
     return _booking_response(db, booking)
@@ -608,7 +609,7 @@ def _build_cash_ticket(
         ticket_token=ticket.token,
         status=booking.status,
         payment_method=booking.payment_method or "CASH",
-        payment_status=payment.status,
+        payment_status="PENDING_PAYMENT" if payment.provider == "CASH" and payment.status == "CREATED" else payment.status,
         total_amount=booking.total_amount,
         created_at=booking.created_at,
         movie_title=movie.title,
@@ -684,21 +685,7 @@ def cash_confirm_booking(
     if booking.expires_at is not None and _as_utc(booking.expires_at) <= now:
         raise HTTPException(status_code=409, detail="Seat hold has expired; start a new booking")
 
-    # 5. No active Razorpay payment
-    active_razorpay = db.scalar(
-        select(Payment.id).where(
-            Payment.booking_id == booking.id,
-            Payment.provider == "RAZORPAY",
-            Payment.status.in_(["CREATED", "AUTHORIZED"]),
-        ).limit(1)
-    )
-    if active_razorpay is not None:
-        raise HTTPException(
-            status_code=409,
-            detail="A Razorpay payment is in progress; cancel it before choosing cash",
-        )
-
-    # 6. Verify all seats locked by this user and unexpired
+    # 5. Verify all seats locked by this user and unexpired
     seats = db.scalars(
         select(ShowSeat)
         .where(ShowSeat.booking_id == booking.id)
@@ -722,12 +709,12 @@ def cash_confirm_booking(
             detail="One or more seat reservations have expired or belong to another session",
         )
 
-    # 7. Recalculate total from authoritative DB data
+    # 6. Recalculate total from authoritative DB data
     db_total = sum((s.price for s in seats), Decimal("0.00"))
     if db_total != booking.total_amount:
         raise HTTPException(status_code=409, detail="Booking total mismatch; please restart the booking")
 
-    # 8. Atomic confirmation
+    # 7. Atomic confirmation
     # Add CASH payment record first so triggers can observe it during status update
     payment = Payment(
         booking_id=booking.id,

@@ -87,7 +87,7 @@ def verify_ticket(token: str = Path(min_length=8, max_length=128), db: Session =
         .limit(1)
     )
     if payment is not None:
-        payment_status = "CAPTURED" if payment.status == "CAPTURED" else payment.status
+        payment_status = "PENDING_PAYMENT" if payment.provider == "CASH" and payment.status == "CREATED" else payment.status
     else:
         payment_status = "PENDING_PAYMENT"
 
@@ -101,7 +101,9 @@ def verify_ticket(token: str = Path(min_length=8, max_length=128), db: Session =
         payment_status=payment_status,
         show_date=_ist_date(show.start_time),
         show_start_time=_ist_time(show.start_time),
+        show_end_time=_ist_time(show.end_time),
         theatre_name=theatre.name,
+        screen_name=screen.name,
         movie_title=movie.title,
         seat_labels=seat_labels,
         is_valid=is_valid,

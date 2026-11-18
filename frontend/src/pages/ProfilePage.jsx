@@ -11,6 +11,7 @@ export function ProfilePage() {
   const [saving, setSaving] = useState(false);
   const [bookings, setBookings] = useState([]);
   const [bookingError, setBookingError] = useState('');
+  const [bookingMessage, setBookingMessage] = useState('');
   const [cancellingId, setCancellingId] = useState(null);
   const navigate = useNavigate();
   const fullName = profile?.full_name ?? user?.user_metadata?.full_name ?? '';
@@ -25,10 +26,17 @@ export function ProfilePage() {
   }, [session?.access_token]);
 
   async function cancelBooking(bookingId) {
-    setCancellingId(bookingId); setBookingError('');
+    const target = bookings.find((item) => item.id === bookingId);
+    const confirmedCash = target?.status === 'CONFIRMED' && target?.payment_method === 'CASH';
+    const prompt = confirmedCash
+      ? 'Cancel this cash ticket? The ticket will become invalid. Any counter refund must be handled by theatre staff.'
+      : 'Cancel this pending booking and release its seats?';
+    if (!window.confirm(prompt)) return;
+    setCancellingId(bookingId); setBookingError(''); setBookingMessage('');
     try {
       const updated = await apiRequest(`/bookings/${bookingId}/cancel`, session.access_token, { method: 'POST' });
       setBookings((items) => items.map((item) => item.id === bookingId ? updated : item));
+      setBookingMessage('Booking cancelled. Its seats are available to book again.');
     } catch (error) { setBookingError(error.message); }
     finally { setCancellingId(null); }
   }
@@ -61,6 +69,7 @@ export function ProfilePage() {
     <section className="profile-bookings">
       <header><h2>Your bookings</h2><p>Booking history is private to your account.</p></header>
       {bookingError ? <AuthMessage type="error">{bookingError}</AuthMessage> : null}
+      {bookingMessage ? <AuthMessage type="success">{bookingMessage}</AuthMessage> : null}
       {bookings.length === 0 && !bookingError ? <p>No bookings yet.</p> : null}
       {bookings.map((booking) => <article className="profile-booking" key={booking.id}>
         <div><strong>{booking.booking_reference}</strong><span>{booking.seats.map((seat) => `${seat.row_label}${seat.seat_number}`).join(', ')} · ₹{Number(booking.total_amount).toFixed(2)}</span><small>{booking.status} · {new Date(booking.created_at).toLocaleString()}</small></div>
@@ -69,7 +78,8 @@ export function ProfilePage() {
             <button className="button button--primary" type="button" style={{ marginRight: '0.5rem' }} onClick={() => navigate(`/ticket/${booking.id}`)}>Ticket</button>
           ) : null}
           <button className="button button--quiet" type="button" onClick={() => navigate(`/booking/${booking.id}`)}>View</button>
-          {booking.status === 'PENDING' ? <button className="button button--quiet" type="button" disabled={cancellingId === booking.id} onClick={() => cancelBooking(booking.id)}>{cancellingId === booking.id ? 'Cancelling…' : 'Cancel'}</button> : null}</div>
+          {(booking.status === 'PENDING' || (booking.status === 'CONFIRMED' && booking.payment_method === 'CASH')) ? <button className="button button--quiet" type="button" disabled={cancellingId === booking.id} onClick={() => cancelBooking(booking.id)}>{cancellingId === booking.id ? 'Cancelling…' : booking.status === 'PENDING' ? 'Cancel booking' : 'Cancel ticket'}</button> : null}
+          {booking.status === 'CANCELLED' ? <button className="button button--quiet" type="button" onClick={() => navigate(`/show/${booking.show_id}`)}>Book again</button> : null}</div>
       </article>)}
     </section>
     <button type="button" className="profile-signout" onClick={logout}>Sign out</button>
