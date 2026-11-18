@@ -18,6 +18,7 @@ export function BookingDetailsPage() {
   const navigate = useNavigate();
   const [booking, setBooking] = useState(null);
   const [error, setError] = useState('');
+  const [relatedDataError, setRelatedDataError] = useState('');
   const [paymentError, setPaymentError] = useState('');
   const [cashBusy, setCashBusy] = useState(false);
   const [cancelling, setCancelling] = useState(false);
@@ -28,11 +29,39 @@ export function BookingDetailsPage() {
     let active = true;
     setBooking(null);
     setError('');
+    setRelatedDataError('');
     apiRequest(`/bookings/${bookingId}`, session.access_token)
-      .then((value) => {
-        if (active) {
+      .then(async (value) => {
+        if (!active) return;
+        const needsShowFallback = !value.movie?.title || !value.show?.start_time || !value.show?.theatre_name;
+        if (!needsShowFallback) {
           setBooking(value);
-          setError('');
+          return;
+        }
+
+        try {
+          const details = await apiRequest(`/shows/${value.show_id}`, session.access_token);
+          if (!active) return;
+          const showFallback = {
+            start_time: details.start_time,
+            end_time: details.end_time,
+            language: details.language,
+            format: details.format,
+            theatre_name: details.theatre?.name,
+            theatre_address: details.theatre?.address,
+            city_name: details.theatre?.city,
+            screen_name: details.screen?.name,
+          };
+          setBooking({
+            ...value,
+            movie: value.movie || details.movie || null,
+            show: { ...showFallback, ...(value.show || {}) },
+          });
+        } catch (reason) {
+          if (active) {
+            setBooking(value);
+            setRelatedDataError(reason.message);
+          }
         }
       })
       .catch((reason) => {
@@ -126,11 +155,12 @@ export function BookingDetailsPage() {
             <dl className="booking-info-grid">
               <div><dt>Date</dt><dd>{istDate(booking.show.start_time)}</dd></div>
               <div><dt>Time</dt><dd>{istTime(booking.show.start_time)} – {istTime(booking.show.end_time)} IST</dd></div>
-              <div><dt>Theatre</dt><dd>{booking.show.theatre_name}</dd></div>
-              <div><dt>Location</dt><dd>{booking.show.theatre_address}, {booking.show.city_name}</dd></div>
-              <div><dt>Screen</dt><dd>{booking.show.screen_name}</dd></div>
+              <div><dt>Theatre</dt><dd>{booking.show.theatre_name || 'Theatre details unavailable'}</dd></div>
+              <div><dt>Location</dt><dd>{[booking.show.theatre_address, booking.show.city_name].filter(Boolean).join(', ') || 'Location details unavailable'}</dd></div>
+              <div><dt>Screen</dt><dd>{booking.show.screen_name || 'Screen details unavailable'}</dd></div>
             </dl>
           ) : <p className="booking-detail-muted">Show information is unavailable.</p>}
+          {relatedDataError && <p className="booking-detail-muted" role="status">Movie and show details could not be loaded: {relatedDataError}</p>}
         </section>
 
         <section className="booking-info-section" aria-labelledby="booking-summary-heading">

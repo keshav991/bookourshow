@@ -60,10 +60,10 @@ class BookingShowResponse(BaseModel):
     end_time: datetime
     language: str
     format: str
-    theatre_name: str
-    theatre_address: str
-    city_name: str
-    screen_name: str
+    theatre_name: str | None = None
+    theatre_address: str | None = None
+    city_name: str | None = None
+    screen_name: str | None = None
 
 
 class BookingResponse(BaseModel):

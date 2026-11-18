@@ -239,6 +239,20 @@ class TestCashBookingWorkflow(unittest.TestCase):
         self.assertIsNone(response.json()["movie"]["duration_minutes"])
         self.assertIsNone(response.json()["movie"]["certification"])
 
+    def test_missing_optional_venue_join_does_not_hide_movie_and_show(self):
+        booking_id = self._create_locked_booking()
+        with self.Session() as db:
+            theatre = db.get(Theatre, 20)
+            theatre.city_id = 9999
+            db.commit()
+        response = self.client.get(f"/bookings/{booking_id}")
+        self.assertEqual(response.status_code, 200, response.text)
+        data = response.json()
+        self.assertEqual(data["movie"]["title"], "Interstellar")
+        self.assertTrue(data["show"]["start_time"].startswith("2030-11-18T14:00:00"))
+        self.assertEqual(data["show"]["theatre_name"], "Example Cinema")
+        self.assertIsNone(data["show"]["city_name"])
+
     def test_booking_details_are_private_to_booking_owner(self):
         booking_id = self._create_locked_booking()
         self.active_user[0] = AuthenticatedUser(id=self.user_b_id, email="other@example.com")

@@ -65,10 +65,11 @@ def _commit(db: Session, conflict_message: str = "The request conflicts with cur
 def _booking_response(db: Session, booking: Booking) -> BookingResponse:
     related = db.execute(
         select(MovieShow, Movie, Screen, Theatre, City)
-        .join(Movie, MovieShow.movie_id == Movie.id)
-        .join(Screen, MovieShow.screen_id == Screen.id)
-        .join(Theatre, Screen.theatre_id == Theatre.id)
-        .join(City, Theatre.city_id == City.id)
+        .select_from(MovieShow)
+        .outerjoin(Movie, MovieShow.movie_id == Movie.id)
+        .outerjoin(Screen, MovieShow.screen_id == Screen.id)
+        .outerjoin(Theatre, Screen.theatre_id == Theatre.id)
+        .outerjoin(City, Theatre.city_id == City.id)
         .where(MovieShow.id == booking.show_id)
     ).first()
     show, movie, screen, theatre, city = related if related else (None, None, None, None, None)
@@ -110,11 +111,11 @@ def _booking_response(db: Session, booking: Booking) -> BookingResponse:
             end_time=show.end_time,
             language=show.language,
             format=show.format,
-            theatre_name=theatre.name,
-            theatre_address=theatre.address,
-            city_name=city.name,
-            screen_name=screen.name,
-        ) if related else None,
+            theatre_name=theatre.name if theatre else None,
+            theatre_address=theatre.address if theatre else None,
+            city_name=city.name if city else None,
+            screen_name=screen.name if screen else None,
+        ) if show else None,
         ticket_valid=bool(ticket and booking.status == "CONFIRMED"),
         expires_at=booking.expires_at,
         created_at=booking.created_at,
