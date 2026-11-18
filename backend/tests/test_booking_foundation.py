@@ -157,7 +157,7 @@ class TestBookingDatabaseFoundation(unittest.TestCase):
         with self.assertRaises(ValueError):
             SeatLockRequest(show_seat_ids=[1, 1])
         with self.assertRaises(ValueError):
-            BookingCreateRequest(show_seat_ids=[0], idempotency_key="long-enough")
+            BookingCreateRequest(show_seat_ids=[0], idempotency_key="long-enough", is_18_or_over=True)
 
     def test_razorpay_signature_verification_uses_constant_time_compare(self):
         order, payment, secret = "order_1", "pay_1", "test_secret"
@@ -181,7 +181,7 @@ class TestSeatLockApi(unittest.TestCase):
         self.Session = lambda: Session(self.engine, expire_on_commit=False)
         with self.Session() as db:
             db.add_all([
-                Movie(id=1, title="Test Movie", language="English", status="NOW_SHOWING"),
+                Movie(id=1, title="Test Movie", language="English", status="NOW_SHOWING", certification="U"),
                 City(id=1, name="Test City", state="Test State", country="India"),
             ])
             db.flush()
@@ -249,7 +249,7 @@ class TestSeatLockApi(unittest.TestCase):
         locked = self.client.post("/shows/1/seats/lock", json={"show_seat_ids": [30]})
         self.assertEqual(locked.status_code, 201, locked.text)
         created = self.client.post("/bookings/shows/1", json={
-            "show_seat_ids": [30], "idempotency_key": "booking-test-0001",
+            "show_seat_ids": [30], "is_18_or_over": True, "idempotency_key": "booking-test-0001",
         })
         self.assertEqual(created.status_code, 201, created.text)
         booking = created.json()
@@ -270,10 +270,30 @@ class TestSeatLockApi(unittest.TestCase):
             self.assertEqual(seat.status, "AVAILABLE")
             self.assertIsNone(seat.booking_id)
 
+    def test_under_18_declaration_is_rejected_for_a_certified_movie(self):
+        with self.Session() as db:
+            db.get(Movie, 1).certification = "A"
+            db.commit()
+        self.client.post("/shows/1/seats/lock", json={"show_seat_ids": [30]})
+        response = self.client.post("/bookings/shows/1", json={
+            "show_seat_ids": [30], "is_18_or_over": False, "idempotency_key": "underage-booking-001",
+        })
+        self.assertEqual(response.status_code, 403, response.text)
+        self.assertEqual(response.json()["detail"], "Sorry, you must be 18 years or older to book tickets for this movie.")
+        with self.Session() as db:
+            self.assertEqual(db.scalars(select(Booking.id)).all(), [])
+
+    def test_under_18_declaration_can_book_non_a_certified_movie(self):
+        self.client.post("/shows/1/seats/lock", json={"show_seat_ids": [30]})
+        response = self.client.post("/bookings/shows/1", json={
+            "show_seat_ids": [30], "is_18_or_over": False, "idempotency_key": "underage-booking-002",
+        })
+        self.assertEqual(response.status_code, 201, response.text)
+
     def _create_pending_booking_with_payment(self):
         self.client.post("/shows/1/seats/lock", json={"show_seat_ids": [30]})
         booking_response = self.client.post("/bookings/shows/1", json={
-            "show_seat_ids": [30], "idempotency_key": "webhook-booking-0001",
+            "show_seat_ids": [30], "is_18_or_over": True, "idempotency_key": "webhook-booking-0001",
         })
         self.assertEqual(booking_response.status_code, 201, booking_response.text)
         booking = booking_response.json()
@@ -326,7 +346,7 @@ class TestSeatLockApi(unittest.TestCase):
             seat.locked_until = datetime.now(timezone.utc) - timedelta(seconds=1)
             db.commit()
         response = self.client.post("/bookings/shows/1", json={
-            "show_seat_ids": [30], "idempotency_key": "expired-lock-test-1",
+            "show_seat_ids": [30], "is_18_or_over": True, "idempotency_key": "expired-lock-test-1",
         })
         self.assertEqual(response.status_code, 409, response.text)
 

@@ -205,6 +205,15 @@ def create_booking(
     current_user: AuthenticatedUser = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
+    show = db.get(MovieShow, show_id)
+    if show is None:
+        raise HTTPException(status_code=404, detail="Show not found")
+    movie = db.get(Movie, show.movie_id)
+    if not payload.is_18_or_over and movie and (movie.certification or "").strip().upper() == "A":
+        raise HTTPException(
+            status_code=403,
+            detail="Sorry, you must be 18 years or older to book tickets for this movie.",
+        )
     existing = db.scalar(select(Booking).where(
         Booking.user_id == current_user.id,
         Booking.idempotency_key == payload.idempotency_key,
@@ -212,9 +221,6 @@ def create_booking(
     if existing:
         db.rollback()
         return _booking_response(db, existing)
-    show = db.get(MovieShow, show_id)
-    if show is None:
-        raise HTTPException(status_code=404, detail="Show not found")
     rows = db.execute(
         select(ShowSeat, Seat)
         .join(Seat, Seat.id == ShowSeat.seat_id)

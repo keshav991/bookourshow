@@ -286,7 +286,7 @@ class TestCashBookingWorkflow(unittest.TestCase):
         relocked = self.client.post("/shows/40/seats/lock", json={"show_seat_ids": [201, 202]})
         self.assertEqual(relocked.status_code, 201, relocked.text)
         rebooked = self.client.post("/bookings/shows/40", json={
-            "show_seat_ids": [201, 202], "idempotency_key": "cash-rebook-after-cancel-01",
+            "show_seat_ids": [201, 202], "is_18_or_over": True, "idempotency_key": "cash-rebook-after-cancel-01",
         })
         self.assertEqual(rebooked.status_code, 201, rebooked.text)
         self.assertEqual(rebooked.json()["status"], "PENDING")

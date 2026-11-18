@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, Clock3, MapPin } from 'lucide-react';
+import { ArrowLeft, Clock3, MapPin, X } from 'lucide-react';
 import { apiRequest } from '../lib/api';
 import { useAuth } from '../context/AuthContext';
 
@@ -24,6 +24,7 @@ export function ShowDetailsPage() {
   const [selectedSeats, setSelectedSeats] = useState([]);
   const [bookingBusy, setBookingBusy] = useState(false);
   const [bookingError, setBookingError] = useState('');
+  const [ageModalOpen, setAgeModalOpen] = useState(false);
   const bookingAttemptKey = useRef(null);
   useEffect(() => {
     let active = true;
@@ -44,6 +45,13 @@ export function ShowDetailsPage() {
       }
     } catch { /* ignore malformed storage */ }
   }, [showId]);
+
+  useEffect(() => {
+    if (!ageModalOpen) return undefined;
+    const handler = (event) => { if (event.key === 'Escape') closeAgeModal(); };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [ageModalOpen]);
 
   useEffect(() => {
     let active = true;
@@ -77,8 +85,16 @@ export function ShowDetailsPage() {
       {seatError ? <div className="show-seat-map__message" role="alert"><p>{seatError}</p><button className="button button--primary" onClick={() => setSeatRetryKey((key) => key + 1)}>Retry</button></div> : null}
       {!seatLoading && !seatError && seatMap?.seats.length ? <SeatMap seats={seatMap.seats} selectedSeats={selectedSeats} onToggle={toggleSeat} /> : null}
       {!seatLoading && !seatError && seatMap?.seats.length === 0 ? <p className="show-seat-map__message" role="status">No seat records are available for this show.</p> : null}
-      {!seatLoading && !seatError && seatMap?.seats.length ? <BookingSummary seats={seatMap.seats} selectedSeats={selectedSeats} user={user} busy={bookingBusy} error={bookingError} onContinue={continueBooking} /> : null}
+      {!seatLoading && !seatError && seatMap?.seats.length ? <BookingSummary seats={seatMap.seats} selectedSeats={selectedSeats} busy={bookingBusy} error={bookingError} onContinue={continueBooking} /> : null}
     </section>
+    {ageModalOpen ? <div className="age-confirmation-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) closeAgeModal(); }}>
+      <section className="age-confirmation-modal" role="dialog" aria-modal="true" aria-labelledby="age-confirmation-title">
+        <button type="button" className="age-confirmation-close" aria-label="Close age confirmation" onClick={closeAgeModal}><X size={20} /></button>
+        <span className="eyebrow eyebrow--red">Before you continue</span>
+        <h2 id="age-confirmation-title">Are you 18 years of age or older?</h2>
+        <div className="age-confirmation-actions"><button type="button" className="button button--primary" onClick={() => respondToAge(true)}>Yes, I'm 18+</button><button type="button" className="button button--light" onClick={() => respondToAge(false)}>No, I'm under 18</button></div>
+      </section>
+    </div> : null}
   </main>;
 
   function toggleSeat(seat) {
@@ -86,6 +102,7 @@ export function ShowDetailsPage() {
       bookingAttemptKey.current = null;
       setSelectedSeats(selectedSeats.filter((id) => id !== seat.show_seat_id));
       setBookingError('');
+      sessionStorage.removeItem('bookourshow:age-confirmation');
       return;
     }
     if (selectedSeats.length >= MAX_SELECTED_SEATS) {
@@ -95,9 +112,35 @@ export function ShowDetailsPage() {
     bookingAttemptKey.current = null;
     setSelectedSeats([...selectedSeats, seat.show_seat_id]);
     setBookingError('');
+    sessionStorage.removeItem('bookourshow:age-confirmation');
   }
 
-  async function continueBooking() {
+  function closeAgeModal() {
+    setAgeModalOpen(false);
+    sessionStorage.removeItem('bookourshow:age-confirmation');
+  }
+
+  function continueBooking() {
+    if (!selectedSeats.length || bookingBusy) return;
+    let prior = null;
+    try { prior = JSON.parse(sessionStorage.getItem('bookourshow:age-confirmation') || 'null'); } catch { /* ignore malformed session data */ }
+    if (prior?.showId === showId && JSON.stringify(prior.selectedSeats) === JSON.stringify(selectedSeats)) return proceedToBooking(prior.is18OrOver);
+    setBookingError('');
+    setAgeModalOpen(true);
+  }
+
+  function respondToAge(is18OrOver) {
+    setAgeModalOpen(false);
+    if (!is18OrOver && (show.movie.certification || '').trim().toUpperCase() === 'A') {
+      setBookingError('Sorry, you must be 18 years or older to book tickets for this movie.');
+      sessionStorage.removeItem('bookourshow:age-confirmation');
+      return;
+    }
+    sessionStorage.setItem('bookourshow:age-confirmation', JSON.stringify({ showId, selectedSeats, is18OrOver }));
+    proceedToBooking(is18OrOver);
+  }
+
+  async function proceedToBooking(is18OrOver) {
     if (!user) {
       const ctx = { showId, selectedSeats };
       localStorage.setItem('bookourshow:booking-context', JSON.stringify(ctx));
@@ -113,10 +156,11 @@ export function ShowDetailsPage() {
       });
       locked = true;
       const booking = await apiRequest(`/bookings/shows/${showId}`, session.access_token, {
-        method: 'POST', body: JSON.stringify({ show_seat_ids: selectedSeats, idempotency_key: bookingAttemptKey.current ||= crypto.randomUUID() }),
+        method: 'POST', body: JSON.stringify({ show_seat_ids: selectedSeats, is_18_or_over: is18OrOver, idempotency_key: bookingAttemptKey.current ||= crypto.randomUUID() }),
       });
       navigate(`/booking/${booking.id}`, { state: { booking } });
       localStorage.removeItem('bookourshow:booking-context');
+      sessionStorage.removeItem('bookourshow:age-confirmation');
     } catch (reason) {
       if (locked) {
         try { await apiRequest(`/shows/${showId}/seats/release`, session.access_token, { method: 'POST', body: JSON.stringify({ show_seat_ids: selectedSeats }) }); }
@@ -168,7 +212,7 @@ function SeatMap({ seats, selectedSeats, onToggle }) {
   </>;
 }
 
-function BookingSummary({ seats, selectedSeats, user, busy, error, onContinue }) {
+function BookingSummary({ seats, selectedSeats, busy, error, onContinue }) {
   const selected = seats.filter((seat) => selectedSeats.includes(seat.show_seat_id));
   const total = selected.reduce((sum, seat) => sum + Number(seat.price), 0);
   const money = new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 2 });
@@ -177,7 +221,7 @@ function BookingSummary({ seats, selectedSeats, user, busy, error, onContinue })
     <div><span className="show-detail-label">Ticket total</span><strong>{money.format(total)}</strong></div>
     {error ? <p role="alert" className="booking-summary__error">{error}</p> : null}
     <button type="button" className="button button--primary" disabled={busy || selected.length === 0} onClick={onContinue}>
-      {busy ? 'Reserving seats…' : user ? 'Continue to booking' : 'Sign in to book'}
+      {busy ? 'Reserving seats…' : 'Continue to booking'}
     </button>
     <small>Seat prices are supplied by the show and checked again when your booking is created.</small>
   </div>;

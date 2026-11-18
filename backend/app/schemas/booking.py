@@ -28,6 +28,7 @@ class SeatReleaseResponse(BaseModel):
 class BookingCreateRequest(BaseModel):
     show_seat_ids: list[int] = Field(min_length=1, max_length=10)
     idempotency_key: str = Field(min_length=8, max_length=128)
+    is_18_or_over: bool
 
     @field_validator("show_seat_ids")
     @classmethod
