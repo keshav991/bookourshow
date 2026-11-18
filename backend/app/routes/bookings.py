@@ -20,7 +20,8 @@ from app.models.show import MovieShow, ShowSeat
 from app.models.theatre import City, Screen, Seat, Theatre
 from app.models.ticket import Ticket
 from app.schemas.booking import (
-    BookingCreateRequest, BookingResponse, BookingSeatResponse, CashConfirmRequest,
+    BookingCreateRequest, BookingMovieResponse, BookingResponse, BookingSeatResponse,
+    BookingShowResponse, CashConfirmRequest,
     CashTicketResponse, PaymentOrderRequest, PaymentOrderResponse, PaymentResponse,
     PaymentVerifyRequest, SeatLock, SeatLockRequest, SeatReleaseResponse, TicketSeatInfo,
 )
@@ -62,7 +63,15 @@ def _commit(db: Session, conflict_message: str = "The request conflicts with cur
 
 
 def _booking_response(db: Session, booking: Booking) -> BookingResponse:
-    show = db.get(MovieShow, booking.show_id)
+    related = db.execute(
+        select(MovieShow, Movie, Screen, Theatre, City)
+        .join(Movie, MovieShow.movie_id == Movie.id)
+        .join(Screen, MovieShow.screen_id == Screen.id)
+        .join(Theatre, Screen.theatre_id == Theatre.id)
+        .join(City, Theatre.city_id == City.id)
+        .where(MovieShow.id == booking.show_id)
+    ).first()
+    show, movie, screen, theatre, city = related if related else (None, None, None, None, None)
     payment = db.scalar(select(Payment).where(
         Payment.booking_id == booking.id
     ).order_by(Payment.created_at.desc()).limit(1))
@@ -72,6 +81,7 @@ def _booking_response(db: Session, booking: Booking) -> BookingResponse:
             payment_status = booking.status
         else:
             payment_status = "PENDING_PAYMENT" if payment.provider == "CASH" and payment.status == "CREATED" else payment.status
+    ticket = db.scalar(select(Ticket).where(Ticket.booking_id == booking.id))
     rows = db.execute(
         select(BookingSeat, Seat)
         .join(ShowSeat, ShowSeat.id == BookingSeat.show_seat_id)
@@ -88,6 +98,24 @@ def _booking_response(db: Session, booking: Booking) -> BookingResponse:
         payment_method=booking.payment_method,
         payment_status=payment_status,
         cancellation_cutoff_at=(show.start_time - timedelta(minutes=settings.CANCELLATION_CUTOFF_MINUTES)) if show else None,
+        movie=BookingMovieResponse(
+            title=movie.title,
+            poster_url=movie.poster_url,
+            language=movie.language,
+            duration_minutes=movie.duration_minutes,
+            certification=movie.certification,
+        ) if movie else None,
+        show=BookingShowResponse(
+            start_time=show.start_time,
+            end_time=show.end_time,
+            language=show.language,
+            format=show.format,
+            theatre_name=theatre.name,
+            theatre_address=theatre.address,
+            city_name=city.name,
+            screen_name=screen.name,
+        ) if related else None,
+        ticket_valid=bool(ticket and booking.status == "CONFIRMED"),
         expires_at=booking.expires_at,
         created_at=booking.created_at,
         seats=[BookingSeatResponse(

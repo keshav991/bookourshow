@@ -118,6 +118,31 @@
 .booking-detail-card dt { color: var(--muted); font-size: 10px; }
 .booking-detail-card dd { margin: 4px 0 0; overflow-wrap: anywhere; font-weight: 650; font-size: 13px; }
 .booking-profile-link { display: inline-flex; margin-top: 17px; }
+.booking-details-page { max-width: 900px; }
+.booking-detail-card { display: grid; gap: 0; padding: 0; overflow: hidden; border: 1px solid var(--border); border-radius: 12px; background: #fff; box-shadow: 0 12px 36px rgb(15 23 42 / 6%); }
+.booking-movie-panel { display: flex; align-items: center; gap: 23px; padding: 23px; background: linear-gradient(120deg, #faf8f6, #fff); }
+.booking-movie-poster { flex: 0 0 112px; width: 112px; height: 164px; border-radius: 8px; background: #eee; object-fit: cover; box-shadow: 0 5px 16px rgb(0 0 0 / 15%); }
+.booking-movie-copy { min-width: 0; }
+.booking-movie-copy h2 { margin: 5px 0 10px; font-size: clamp(22px, 4vw, 30px); }
+.booking-movie-meta { display: flex; flex-wrap: wrap; gap: 8px; }
+.booking-movie-meta span { padding: 5px 9px; border: 1px solid #e8e4e1; border-radius: 999px; color: var(--muted); font-size: 11px; }
+.booking-show-language, .booking-detail-muted { color: var(--muted); font-size: 12px; }
+.booking-info-section { padding: 20px 23px; border-top: 1px solid var(--border); }
+.booking-info-section h2 { margin: 0 0 14px; font-size: 16px; }
+.booking-info-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 15px 22px; margin: 0; }
+.booking-info-grid > div { min-width: 0; }
+.booking-info-grid dt { color: var(--muted); font-size: 10px; }
+.booking-info-grid dd { margin: 4px 0 0; overflow-wrap: anywhere; font-size: 13px; font-weight: 650; line-height: 1.5; }
+.booking-status { display: inline-flex; padding: 4px 8px; border-radius: 999px; background: #f3f4f6; font-size: 11px; }
+.booking-status--confirmed { color: #176b36; background: #eaf7ee; }
+.booking-status--pending { color: #8a5a00; background: #fff5d8; }
+.booking-status--cancelled, .booking-status--expired { color: #a33028; background: #fff0ee; }
+.booking-detail-card > p, .booking-detail-card > button, .booking-detail-card > a { margin-right: 23px; margin-left: 23px; }
+.booking-detail-card > p { margin-top: 13px; margin-bottom: 0; }
+.booking-detail-card > button, .booking-detail-card > a { justify-self: start; margin-top: 15px; }
+.booking-detail-card > .booking-payment-buttons { margin: 15px 23px 23px; }
+.booking-detail-card > .booking-payment-buttons button { margin: 0; }
+.booking-detail-card > p:last-child { margin-bottom: 23px; }
 .theatre-skeletons { display: grid; gap: 13px; }
 .theatre-skeleton { display: grid; gap: 11px; padding: 20px; border: 1px solid #eee; border-radius: 8px; }
 .theatre-skeleton > span, .theatre-skeleton i, .skeleton-summary i, .skeleton-summary b, .skeleton-dates i, .show-detail-skeleton > i, .show-detail-skeleton b { display: block; border-radius: 5px; background: linear-gradient(90deg, #f0f0f0 20%, #f8f8f8 45%, #f0f0f0 70%); background-size: 220% 100%; animation: show-shimmer 1.35s linear infinite; }
@@ -155,6 +180,12 @@
   .booking-summary .button { grid-column: 1 / -1; grid-row: auto; }
   .profile-booking { align-items: flex-start; flex-direction: column; }
   .booking-detail-card dl { grid-template-columns: 1fr; }
+  .booking-movie-panel { align-items: flex-start; gap: 15px; padding: 17px; }
+  .booking-movie-poster { flex-basis: 82px; width: 82px; height: 123px; }
+  .booking-info-section { padding: 17px; }
+  .booking-info-grid { grid-template-columns: 1fr; gap: 12px; }
+  .booking-detail-card > p, .booking-detail-card > button, .booking-detail-card > a { margin-right: 17px; margin-left: 17px; }
+  .booking-detail-card > .booking-payment-buttons { margin: 15px 17px 20px; }
 }
 
 

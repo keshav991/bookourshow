@@ -47,6 +47,25 @@ class BookingSeatResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class BookingMovieResponse(BaseModel):
+    title: str
+    poster_url: str | None = None
+    language: str | None = None
+    duration_minutes: int | None = None
+    certification: str | None = None
+
+
+class BookingShowResponse(BaseModel):
+    start_time: datetime
+    end_time: datetime
+    language: str
+    format: str
+    theatre_name: str
+    theatre_address: str
+    city_name: str
+    screen_name: str
+
+
 class BookingResponse(BaseModel):
     id: int
     booking_reference: str
@@ -56,6 +75,9 @@ class BookingResponse(BaseModel):
     payment_method: str | None = None
     payment_status: str | None = None
     cancellation_cutoff_at: datetime | None = None
+    movie: BookingMovieResponse | None = None
+    show: BookingShowResponse | None = None
+    ticket_valid: bool = False
     expires_at: datetime | None
     created_at: datetime
     seats: list[BookingSeatResponse]

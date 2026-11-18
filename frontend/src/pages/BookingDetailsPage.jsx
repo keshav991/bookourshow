@@ -1,16 +1,22 @@
 import { useEffect, useRef, useState } from 'react';
-import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import { apiRequest } from '../lib/api';
 import { useAuth } from '../context/AuthContext';
 
 const money = new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 2 });
+const istDateTime = (value) => new Date(value).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' });
+const istDate = (value) => new Date(value).toLocaleDateString('en-IN', {
+  timeZone: 'Asia/Kolkata', weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
+});
+const istTime = (value) => new Date(value).toLocaleTimeString('en-IN', {
+  timeZone: 'Asia/Kolkata', hour: 'numeric', minute: '2-digit',
+});
 
 export function BookingDetailsPage() {
   const { bookingId } = useParams();
   const { session } = useAuth();
-  const location = useLocation();
   const navigate = useNavigate();
-  const [booking, setBooking] = useState(location.state?.booking || null);
+  const [booking, setBooking] = useState(null);
   const [error, setError] = useState('');
   const [paymentError, setPaymentError] = useState('');
   const [cashBusy, setCashBusy] = useState(false);
@@ -20,6 +26,8 @@ export function BookingDetailsPage() {
   useEffect(() => {
     if (!session?.access_token) return;
     let active = true;
+    setBooking(null);
+    setError('');
     apiRequest(`/bookings/${bookingId}`, session.access_token)
       .then((value) => {
         if (active) {
@@ -56,7 +64,7 @@ export function BookingDetailsPage() {
     if (!booking || !session?.access_token || cancelling) return;
     const confirmedCash = String(booking.status).toUpperCase() === 'CONFIRMED' && booking.payment_method === 'CASH';
     const cutoffText = booking.cancellation_cutoff_at
-      ? ` Cancellation is available until ${new Date(booking.cancellation_cutoff_at).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })}.`
+      ? ` Cancellation is available until ${istDateTime(booking.cancellation_cutoff_at)} IST.`
       : '';
     const prompt = confirmedCash
       ? `Cancel this cash ticket? The booking and QR ticket will become invalid.${cutoffText} Any counter refund must be handled by theatre staff.`
@@ -87,37 +95,72 @@ export function BookingDetailsPage() {
   const isConfirmed = String(booking.status || '').toUpperCase() === 'CONFIRMED';
 
   return (
-    <main className="page-container show-page">
-      <span className="eyebrow eyebrow--red">
-        {isConfirmed ? 'Booking confirmed' : 'Booking created'}
-      </span>
-      <h1 className="booking-title">
-        {isConfirmed ? 'Your tickets are confirmed' : 'Your seats are on hold'}
-      </h1>
-      <section className="show-detail-card booking-detail-card">
+    <main className="page-container show-page booking-details-page">
+      <span className="eyebrow eyebrow--red">Booking details</span>
+      <h1 className="booking-title">{isConfirmed ? 'Your booking is confirmed' : 'Your booking'}</h1>
+      <section className="booking-detail-card">
+        <div className="booking-movie-panel">
+          <img
+            className="booking-movie-poster"
+            src={booking.movie?.poster_url || '/images/poster-fallback.svg'}
+            alt={booking.movie?.title ? `${booking.movie.title} poster` : 'Movie poster unavailable'}
+            onError={(event) => { event.currentTarget.src = '/images/poster-fallback.svg'; }}
+          />
+          <div className="booking-movie-copy">
+            <span className="eyebrow">Movie</span>
+            <h2>{booking.movie?.title || 'Movie details unavailable'}</h2>
+            <div className="booking-movie-meta">
+              {booking.movie?.language && <span>{booking.movie.language}</span>}
+              {booking.movie?.duration_minutes && <span>{booking.movie.duration_minutes} min</span>}
+              {booking.movie?.certification && <span>{booking.movie.certification}</span>}
+            </div>
+            {booking.movie?.title && booking.show?.language && booking.show.language !== booking.movie.language && (
+              <p className="booking-show-language">Show language: {booking.show.language}</p>
+            )}
+          </div>
+        </div>
+
+        <section className="booking-info-section" aria-labelledby="booking-show-heading">
+          <h2 id="booking-show-heading">Showtime</h2>
+          {booking.show ? (
+            <dl className="booking-info-grid">
+              <div><dt>Date</dt><dd>{istDate(booking.show.start_time)}</dd></div>
+              <div><dt>Time</dt><dd>{istTime(booking.show.start_time)} – {istTime(booking.show.end_time)} IST</dd></div>
+              <div><dt>Theatre</dt><dd>{booking.show.theatre_name}</dd></div>
+              <div><dt>Location</dt><dd>{booking.show.theatre_address}, {booking.show.city_name}</dd></div>
+              <div><dt>Screen</dt><dd>{booking.show.screen_name}</dd></div>
+            </dl>
+          ) : <p className="booking-detail-muted">Show information is unavailable.</p>}
+        </section>
+
+        <section className="booking-info-section" aria-labelledby="booking-summary-heading">
+          <h2 id="booking-summary-heading">Booking summary</h2>
+          <dl className="booking-info-grid booking-info-grid--summary">
+            <div><dt>Booking reference</dt><dd>{booking.booking_reference}</dd></div>
+            <div><dt>Booking status</dt><dd><span className={`booking-status booking-status--${String(booking.status).toLowerCase()}`}>{booking.status}</span></dd></div>
+            <div><dt>Payment method</dt><dd>{booking.payment_method || (isPending ? 'Cash (Pay at Counter)' : '—')}</dd></div>
+            <div><dt>Payment status</dt><dd>{booking.payment_status || (isPending ? 'PENDING_PAYMENT' : '—')}</dd></div>
+            <div><dt>Selected seats</dt><dd>{booking.seats.map((seat) => `${seat.row_label}${seat.seat_number}`).join(', ') || '—'}</dd></div>
+            <div><dt>Number of seats</dt><dd>{booking.seats.length}</dd></div>
+            <div><dt>Total amount</dt><dd>{money.format(Number(booking.total_amount))}</dd></div>
+            <div><dt>Booking created</dt><dd>{istDateTime(booking.created_at)} IST</dd></div>
+          </dl>
+        </section>
+
         {isPending && (
-          <p>Your seats are reserved until {booking.expires_at ? new Date(booking.expires_at).toLocaleString('en-IN') : 'the hold expires'}.</p>
+          <p>Your seats are reserved until {booking.expires_at ? `${istDateTime(booking.expires_at)} IST` : 'the hold expires'}.</p>
         )}
         {isPending && (
           <button type="button" className="button button--quiet" disabled={isBusy || cancelling} onClick={cancelBooking}>
             {cancelling ? 'Cancelling…' : 'Cancel booking'}
           </button>
         )}
-        {booking.payment_status && <p>Payment status: {booking.payment_status}</p>}
-        {isConfirmed && booking.payment_method === 'CASH' && <p>Cash tickets can be cancelled until {booking.cancellation_cutoff_at ? new Date(booking.cancellation_cutoff_at).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' }) : 'the configured showtime cutoff'} IST. Any refund for cash already collected must be handled by theatre staff.</p>}
+        {isConfirmed && booking.payment_method === 'CASH' && <p>Cash tickets can be cancelled until {booking.cancellation_cutoff_at ? `${istDateTime(booking.cancellation_cutoff_at)} IST` : 'the configured showtime cutoff'}. Any refund for cash already collected must be handled by theatre staff.</p>}
         {isConfirmed && booking.payment_method === 'CASH' && (
           <button type="button" className="button button--quiet" disabled={cancelling} onClick={cancelBooking}>
             {cancelling ? 'Cancelling…' : 'Cancel ticket'}
           </button>
         )}
-        <dl>
-          <div><dt>Reference</dt><dd>{booking.booking_reference}</dd></div>
-          <div><dt>Status</dt><dd>{booking.status}</dd></div>
-          {booking.payment_method && <div><dt>Payment</dt><dd>{booking.payment_method}</dd></div>}
-          <div><dt>Seats</dt><dd>{booking.seats.map((seat) => `${seat.row_label}${seat.seat_number}`).join(', ') || '—'}</dd></div>
-          <div><dt>Total</dt><dd>{money.format(Number(booking.total_amount))}</dd></div>
-        </dl>
-
         {isPending && (
           <p>Confirm your booking with Cash (Pay at Counter). Payment remains pending until theatre staff records collection.</p>
         )}
@@ -147,11 +190,12 @@ export function BookingDetailsPage() {
           </div>
         )}
 
-        {isConfirmed && (
+        {isConfirmed && booking.ticket_valid && (
           <Link className="button button--primary" to={`/ticket/${booking.id}`}>
             View ticket
           </Link>
         )}
+        {isConfirmed && !booking.ticket_valid && <p className="booking-detail-muted">Ticket details are not available for this booking.</p>}
       </section>
       <Link className="button button--primary booking-profile-link" to="/profile">View your bookings</Link>
     </main>

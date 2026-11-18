@@ -174,6 +174,76 @@ class TestCashBookingWorkflow(unittest.TestCase):
             ticket = db.query(Ticket).filter(Ticket.booking_id == bid).first()
             self.assertIsNotNone(ticket)
             self.assertEqual(ticket.token, data["ticket_token"])
+        details = self.client.get(f"/bookings/{bid}")
+        self.assertEqual(details.status_code, 200, details.text)
+        self.assertTrue(details.json()["ticket_valid"])
+        self.assertEqual(details.json()["payment_status"], "PENDING_PAYMENT")
+
+    def test_booking_details_returns_related_movie_show_and_venue_data(self):
+        booking_id = self._create_locked_booking()
+        response = self.client.get(f"/bookings/{booking_id}")
+        self.assertEqual(response.status_code, 200, response.text)
+        data = response.json()
+        self.assertEqual(data["movie"]["title"], "Interstellar")
+        self.assertEqual(data["movie"]["language"], "English")
+        self.assertEqual(data["show"]["theatre_name"], "Example Cinema")
+        self.assertEqual(data["show"]["theatre_address"], "10 Chowringhee Road")
+        self.assertEqual(data["show"]["city_name"], "Kolkata")
+        self.assertEqual(data["show"]["screen_name"], "Screen 2")
+        self.assertEqual(len(data["seats"]), 2)
+        self.assertEqual(data["status"], "PENDING")
+        self.assertFalse(data["ticket_valid"])
+
+    def test_booking_details_use_each_bookings_actual_movie_and_show(self):
+        self._create_locked_booking()
+        starts = datetime(2030, 11, 19, 14, 0, tzinfo=timezone.utc)
+        expires = datetime.now(timezone.utc) + timedelta(minutes=4)
+        with self.Session() as db:
+            movie = Movie(id=2, title="Arrival", duration_minutes=116, language="English", certification="UA", status="NOW_SHOWING")
+            db.add(movie)
+            db.flush()
+            show = MovieShow(id=41, movie_id=movie.id, screen_id=30, start_time=starts,
+                             end_time=starts + timedelta(minutes=116), language="English", format="2D")
+            db.add(show)
+            db.flush()
+            seat = Seat(id=103, screen_id=30, row_label="B", seat_number=1, seat_type="REGULAR")
+            db.add(seat)
+            db.flush()
+            show_seat = ShowSeat(id=203, show_id=show.id, screen_id=30, seat_id=seat.id,
+                                 booking_id=501, price=Decimal("180.00"), status="LOCKED",
+                                 locked_by=self.user_a_id, locked_until=expires)
+            booking = Booking(id=501, user_id=self.user_a_id, show_id=41,
+                              booking_reference="BOS-ARRIVAL-01", total_amount=Decimal("180.00"),
+                              status="PENDING", idempotency_key="arrival-booking-01", expires_at=expires)
+            db.add_all([booking, show_seat])
+            db.flush()
+            db.add(BookingSeat(booking_id=booking.id, show_id=show.id,
+                               show_seat_id=show_seat.id, price=show_seat.price))
+            db.commit()
+        data = self.client.get("/bookings/501").json()
+        self.assertEqual(data["movie"]["title"], "Arrival")
+        self.assertTrue(data["show"]["start_time"].startswith("2030-11-19T14:00:00"))
+        self.assertEqual(data["seats"][0]["row_label"], "B")
+
+    def test_booking_details_tolerates_optional_movie_metadata(self):
+        booking_id = self._create_locked_booking()
+        with self.Session() as db:
+            movie = db.get(Movie, 1)
+            movie.poster_url = None
+            movie.duration_minutes = None
+            movie.certification = None
+            db.commit()
+        response = self.client.get(f"/bookings/{booking_id}")
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertIsNone(response.json()["movie"]["poster_url"])
+        self.assertIsNone(response.json()["movie"]["duration_minutes"])
+        self.assertIsNone(response.json()["movie"]["certification"])
+
+    def test_booking_details_are_private_to_booking_owner(self):
+        booking_id = self._create_locked_booking()
+        self.active_user[0] = AuthenticatedUser(id=self.user_b_id, email="other@example.com")
+        response = self.client.get(f"/bookings/{booking_id}")
+        self.assertEqual(response.status_code, 404)
 
     def test_confirmed_cash_ticket_cancellation_releases_seats_and_invalidates_qr(self):
         booking_id = self._create_locked_booking()
@@ -183,6 +253,7 @@ class TestCashBookingWorkflow(unittest.TestCase):
         cancelled = self.client.post(f"/bookings/{booking_id}/cancel")
         self.assertEqual(cancelled.status_code, 200, cancelled.text)
         self.assertEqual(cancelled.json()["status"], "CANCELLED")
+        self.assertFalse(cancelled.json()["ticket_valid"])
         self.assertEqual(cancelled.json()["payment_status"], "CANCELLED")
         repeated = self.client.post(f"/bookings/{booking_id}/cancel")
         self.assertEqual(repeated.status_code, 200, repeated.text)

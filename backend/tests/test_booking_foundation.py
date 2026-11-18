@@ -21,8 +21,9 @@ from app.database import Base
 from app.core.config import settings
 from app.models.booking import Booking, BookingSeat, Payment
 from app.models.ticket import Ticket
+from app.models.movie import Movie
 from app.models.show import MovieShow, ShowSeat
-from app.models.theatre import Seat
+from app.models.theatre import City, Screen, Seat, Theatre
 from app.schemas.booking import BookingCreateRequest, SeatLockRequest
 from app.schemas.user import AuthenticatedUser
 from app.dependencies.auth import get_current_user
@@ -175,10 +176,19 @@ class TestBookingDatabaseFoundation(unittest.TestCase):
 class TestSeatLockApi(unittest.TestCase):
     def setUp(self):
         self.engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
-        self.tables = [MovieShow.__table__, Booking.__table__, ShowSeat.__table__, Seat.__table__, BookingSeat.__table__, Payment.__table__, Ticket.__table__]
+        self.tables = [City.__table__, Movie.__table__, Theatre.__table__, Screen.__table__, MovieShow.__table__, Booking.__table__, ShowSeat.__table__, Seat.__table__, BookingSeat.__table__, Payment.__table__, Ticket.__table__]
         Base.metadata.create_all(self.engine, tables=self.tables)
         self.Session = lambda: Session(self.engine, expire_on_commit=False)
         with self.Session() as db:
+            db.add_all([
+                Movie(id=1, title="Test Movie", language="English", status="NOW_SHOWING"),
+                City(id=1, name="Test City", state="Test State", country="India"),
+            ])
+            db.flush()
+            db.add(Theatre(id=1, city_id=1, name="Test Theatre", address="1 Test Road"))
+            db.flush()
+            db.add(Screen(id=2, theatre_id=1, name="Screen 1"))
+            db.flush()
             db.execute(insert(MovieShow.__table__).values(
                 id=1,movie_id=1,screen_id=2,start_time=datetime(2030,1,1,tzinfo=timezone.utc),
                 end_time=datetime(2030,1,1,2,tzinfo=timezone.utc),language="English",format="2D",
